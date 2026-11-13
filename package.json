@@ -1,0 +1,48 @@
+{
+  "name": "telemind-monorepo",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "description": "Production-grade AI-powered Telegram Knowledge Assistant built with NestJS, TypeScript, PostgreSQL, Redis, Docker, Prisma, BullMQ, Gemini AI, and pgvector",
+  "author": "TeleMind Contributors",
+  "license": "MIT",
+  "packageManager": "pnpm@9.12.3",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter=\"./apps/*\" --filter=\"./packages/*\" run build",
+    "dev": "pnpm -r --parallel --filter=\"./apps/*\" run dev",
+    "dev:api": "pnpm --filter=@telemind/api run dev",
+    "dev:worker": "pnpm --filter=@telemind/worker run dev",
+    "dev:dashboard": "pnpm --filter=@telemind/dashboard run dev",
+    "lint": "pnpm -r run lint",
+    "lint:fix": "pnpm -r run lint --fix",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md,yml,yaml}\"",
+    "test": "pnpm -r run test",
+    "test:cov": "pnpm -r run test:cov",
+    "test:e2e": "pnpm -r run test:e2e",
+    "db:generate": "pnpm --filter=@telemind/database run db:generate",
+    "db:migrate:dev": "pnpm --filter=@telemind/database run db:migrate:dev",
+    "db:migrate:deploy": "pnpm --filter=@telemind/database run db:migrate:deploy",
+    "db:studio": "pnpm --filter=@telemind/database run db:studio",
+    "db:seed": "pnpm --filter=@telemind/database run db:seed",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "clean": "pnpm -r run clean && rimraf node_modules",
+    "clean:build": "rimraf apps/*/dist packages/*/dist apps/*/build .turbo"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "@typescript-eslint/eslint-plugin": "^8.14.0",
+    "@typescript-eslint/parser": "^8.14.0",
+    "eslint": "^9.14.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "prettier": "^3.3.3",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.3"
+  }
+}

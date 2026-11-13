@@ -1,0 +1,186 @@
+// ==============================================================================
+// TeleMind Master Prisma Schema
+// PostgreSQL with pgvector extension enabled
+// ==============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector"), uuidOssp(map: "uuid-ossp"), pgTrgm(map: "pg_trgm")]
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  INDEXED
+  FAILED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model User {
+  id           String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  email        String        @unique @db.VarChar(255)
+  passwordHash String        @db.VarChar(255)
+  fullName     String?       @db.VarChar(255)
+  role         UserRole      @default(MEMBER)
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime      @updatedAt @db.Timestamptz(6)
+
+  telegramUsers TelegramUser[]
+  documents     Document[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model TelegramUser {
+  id              String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  telegramId      BigInt       @unique
+  username        String?      @db.VarChar(255)
+  firstName       String?      @db.VarChar(255)
+  lastName        String?      @db.VarChar(255)
+  isBlocked       Boolean      @default(false)
+  userId          String?      @db.Uuid
+  user            User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt       DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime     @updatedAt @db.Timestamptz(6)
+
+  chats           TelegramChatMember[]
+  messages        TelegramMessage[]
+
+  @@index([telegramId])
+  @@map("telegram_users")
+}
+
+model TelegramChat {
+  id           String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  chatId       BigInt       @unique
+  type         String       @db.VarChar(50) // private, group, supergroup, channel
+  title        String?      @db.VarChar(255)
+  createdAt    DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime     @updatedAt @db.Timestamptz(6)
+
+  members      TelegramChatMember[]
+  messages     TelegramMessage[]
+
+  @@index([chatId])
+  @@map("telegram_chats")
+}
+
+model TelegramChatMember {
+  id             String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  telegramUserId String        @db.Uuid
+  telegramChatId String        @db.Uuid
+  joinedAt       DateTime      @default(now()) @db.Timestamptz(6)
+
+  telegramUser   TelegramUser  @relation(fields: [telegramUserId], references: [id], onDelete: Cascade)
+  telegramChat   TelegramChat  @relation(fields: [telegramChatId], references: [id], onDelete: Cascade)
+
+  @@unique([telegramUserId, telegramChatId])
+  @@map("telegram_chat_members")
+}
+
+model TelegramMessage {
+  id              String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  telegramUserId  String?        @db.Uuid
+  telegramChatId  String         @db.Uuid
+  messageId       BigInt
+  role            MessageRole    @default(USER)
+  text            String         @db.Text
+  tokenCount      Int?           @default(0)
+  createdAt       DateTime       @default(now()) @db.Timestamptz(6)
+
+  telegramUser    TelegramUser?  @relation(fields: [telegramUserId], references: [id], onDelete: SetNull)
+  telegramChat    TelegramChat   @relation(fields: [telegramChatId], references: [id], onDelete: Cascade)
+
+  @@index([telegramChatId, createdAt(sort: Desc)])
+  @@map("telegram_messages")
+}
+
+model KnowledgeBase {
+  id          String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String       @db.VarChar(255)
+  slug        String       @unique @db.VarChar(255)
+  description String?      @db.Text
+  createdAt   DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime     @updatedAt @db.Timestamptz(6)
+
+  documents   Document[]
+
+  @@map("knowledge_bases")
+}
+
+model Document {
+  id               String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  knowledgeBaseId  String?         @db.Uuid
+  uploadedById     String?         @db.Uuid
+  title            String          @db.VarChar(255)
+  fileKey          String          @db.VarChar(512)
+  fileSize         Int
+  mimeType         String          @db.VarChar(100)
+  status           DocumentStatus  @default(PENDING)
+  errorMessage     String?         @db.Text
+  totalChunks      Int             @default(0)
+  createdAt        DateTime        @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime        @updatedAt @db.Timestamptz(6)
+
+  knowledgeBase    KnowledgeBase?  @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
+  uploadedBy       User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  chunks           DocumentChunk[]
+
+  @@index([knowledgeBaseId])
+  @@index([status])
+  @@map("documents")
+}
+
+model DocumentChunk {
+  id          String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  documentId  String                 @db.Uuid
+  chunkIndex  Int
+  content     String                 @db.Text
+  metadata    Json                   @default("{}")
+  // 768 dimensions for Gemini text-embedding-004
+  embedding   Unsupported("vector(768)")?
+  createdAt   DateTime               @default(now()) @db.Timestamptz(6)
+
+  document    Document               @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@map("document_chunks")
+}
+
+model AuditLog {
+  id          String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId      String?      @db.Uuid
+  action      String       @db.VarChar(100)
+  resource    String       @db.VarChar(100)
+  details     Json         @default("{}")
+  ipAddress   String?      @db.VarChar(45)
+  userAgent   String?      @db.Text
+  createdAt   DateTime     @default(now()) @db.Timestamptz(6)
+
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_logs")
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@telemind/ai",
+  "version": "0.1.0-alpha.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint \"src/**/*.ts\"",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@google/genai": "^0.1.1",
+    "@telemind/config": "workspace:*",
+    "@telemind/logger": "workspace:*",
+    "@telemind/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "typescript": "^5.6.3"
+  }
+}
