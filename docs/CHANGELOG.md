@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
+
 - Complete implementation of NestJS REST API Gateway.
 - Complete BullMQ queue processing in background worker.
 - Document parsing and pgvector similarity search integration.
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0-alpha.0] - 2026-11-13
 
 ### Added
+
 - Enterprise monorepo scaffolding using `pnpm` workspaces (`apps/`, `packages/`, `docs/`, `docker/`, `scripts/`).
 - Deployable app shells: `@telemind/api` (NestJS API), `@telemind/worker` (BullMQ), `@telemind/dashboard` (Next.js 14).
 - Shared package shells: `@telemind/database` (Prisma + pgvector), `@telemind/ai` (Gemini), `@telemind/telegram` (Telegraf), `@telemind/rag` (RAG Engine), `@telemind/shared`, `@telemind/config`, `@telemind/logger`.

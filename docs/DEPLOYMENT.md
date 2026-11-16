@@ -35,6 +35,7 @@ graph TD
 ## 2. Docker & Multi-Stage Builds
 
 All application components (`apps/api`, `apps/worker`, `apps/dashboard`) utilize hardened multi-stage Dockerfiles:
+
 - **Base**: `node:20-alpine` with `corepack` and `pnpm`.
 - **Dependencies**: Cache-mounted `pnpm install --frozen-lockfile`.
 - **Builder**: TypeScript compilation, Prisma client generation, and Next.js standalone optimization.
@@ -45,13 +46,16 @@ All application components (`apps/api`, `apps/worker`, `apps/dashboard`) utilize
 ## 3. Quick Start Deployment via Docker Compose
 
 ### 3.1 Provisioning the VPS
+
 Recommended baseline specification:
+
 - **OS**: Ubuntu 22.04 LTS or Debian 12
 - **CPU**: 4 vCPU
 - **RAM**: 8 GB (PostgreSQL HNSW indexes and Node.js buffers)
 - **Disk**: 80 GB SSD
 
 ### 3.2 Deployment Commands
+
 ```bash
 # 1. Clone repository
 git clone https://github.com/telemind/telemind.git /opt/telemind
@@ -76,13 +80,16 @@ docker compose logs -f api worker
 The reverse proxy handles TLS termination, rate limiting, and HTTP request routing.
 
 ### 4.1 SSL Certificate Generation via Certbot
+
 ```bash
 sudo apt-get install -y certbot python3-certbot-nginx
 sudo certbot certonly --standalone -d telemind.example.com -d api.telemind.example.com
 ```
 
 ### 4.2 Nginx Host Binding
+
 The Nginx configuration defined in `docker/nginx.conf` proxies incoming traffic:
+
 - `api.telemind.example.com` -> `http://127.0.0.1:3000` (API Gateway)
 - `telemind.example.com` -> `http://127.0.0.1:3001` (Admin Dashboard)
 
@@ -104,6 +111,7 @@ curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
 ```
 
 Verify webhook status:
+
 ```bash
 curl -s "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo" | jq
 ```
@@ -113,6 +121,7 @@ curl -s "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getWebhookInfo" | jq
 ## 6. Continuous Integration & Continuous Deployment (CI/CD)
 
 The GitHub Actions pipeline (`.github/workflows/ci.yml`) automates verification on every push:
+
 1. **Lint & Formatting**: Prettier, ESLint check.
 2. **Type Checking**: Full monorepo TypeScript verification.
 3. **Database Spin-up**: Testcontainers / service containers running `pgvector/pgvector:pg16` and `redis:7-alpine`.

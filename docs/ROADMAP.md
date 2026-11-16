@@ -33,6 +33,7 @@ gantt
 ## Detailed Milestones
 
 ### Phase 0: Project Inception & Foundation Scaffolding
+
 - **Estimated Timeline**: Weeks 1–2 (November 2026)
 - **Objectives**:
   - Establish monorepo structure with `pnpm-workspace.yaml`.
@@ -45,6 +46,7 @@ gantt
 ---
 
 ### Phase 1: Database Architecture & pgvector Integration
+
 - **Estimated Timeline**: Weeks 3–4 (November 2026)
 - **Objectives**:
   - Finalize Prisma schema with `postgresqlExtensions` preview feature.
@@ -56,6 +58,7 @@ gantt
 ---
 
 ### Phase 2: Core API Gateway & Telegram Ingress
+
 - **Estimated Timeline**: Weeks 5–6 (December 2026)
 - **Objectives**:
   - Implement NestJS Fastify/Express core modules in `apps/api`.
@@ -68,6 +71,7 @@ gantt
 ---
 
 ### Phase 3: BullMQ Worker & Distributed Queue Infrastructure
+
 - **Estimated Timeline**: Weeks 7–8 (December 2026)
 - **Objectives**:
   - Configure BullMQ connection with Redis in `apps/worker`.
@@ -79,6 +83,7 @@ gantt
 ---
 
 ### Phase 4: Google Gemini AI Integration Layer
+
 - **Estimated Timeline**: Weeks 9–10 (January 2027)
 - **Objectives**:
   - Implement Gemini client wrapper in `packages/ai` using `@google/genai`.
@@ -90,6 +95,7 @@ gantt
 ---
 
 ### Phase 5: RAG Ingestion & Vector Retrieval Pipeline
+
 - **Estimated Timeline**: Weeks 11–12 (January 2027)
 - **Objectives**:
   - Build document parser (PDF, Markdown, TXT) in `packages/rag`.
@@ -101,6 +107,7 @@ gantt
 ---
 
 ### Phase 6: Telegram Bot Interactive UX & Commands
+
 - **Estimated Timeline**: Weeks 13–14 (February 2027)
 - **Objectives**:
   - Build command handlers in `packages/telegram` (`/start`, `/ask`, `/index`, `/kb`, `/clear`, `/help`).
@@ -112,6 +119,7 @@ gantt
 ---
 
 ### Phase 7: Web Administration Dashboard
+
 - **Estimated Timeline**: Weeks 15–16 (February 2027)
 - **Objectives**:
   - Develop Next.js 14 App Router UI in `apps/dashboard`.
@@ -123,6 +131,7 @@ gantt
 ---
 
 ### Phase 8: Enterprise Security Hardening & Audit
+
 - **Estimated Timeline**: Weeks 17–18 (March 2027)
 - **Objectives**:
   - Implement granular RBAC guards across REST APIs.
@@ -134,6 +143,7 @@ gantt
 ---
 
 ### Phase 9: Production Deployment, Monitoring & CI/CD
+
 - **Estimated Timeline**: Weeks 19–20 (March 2027)
 - **Objectives**:
   - Write multi-stage production Dockerfiles and Nginx reverse proxy configs.
@@ -145,6 +155,7 @@ gantt
 ---
 
 ### Phase 10: Multimodal AI & Advanced Agent Capabilities
+
 - **Estimated Timeline**: Weeks 21–24 (April–May 2027)
 - **Objectives**:
   - Support voice notes: transcribe audio via Gemini and answer in text or voice.

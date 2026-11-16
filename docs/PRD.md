@@ -25,12 +25,14 @@
 ## 3. Goals & Objectives
 
 ### 3.1 Business Goals
+
 - Deliver an always-available knowledge assistant directly inside Telegram for frictionless mobile access.
 - Enable instant enterprise knowledge retrieval with strict source citations.
 - Ensure strict multi-tenant data isolation and privacy.
 - Support horizontal scaling with decoupled asynchronous job processing.
 
 ### 3.2 Technical Goals
+
 - Keep average Telegram query response latency under 3.5 seconds for RAG queries.
 - Ensure 99.95% API uptime with sub-200ms Telegram webhook ingestion via BullMQ queues.
 - Support documents up to 50MB across PDF, DOCX, Markdown, and TXT formats.
@@ -40,11 +42,11 @@
 
 ## 4. Target Users & Personas
 
-| Persona | Description | Primary Needs |
-|---|---|---|
-| **Knowledge Worker / Researcher** | Accesses scientific papers, technical specs, and project briefs on mobile on the go. | Fast answers, accurate citations, PDF summarization. |
-| **Field Support / Operations** | Engineers in the field requiring instant equipment manuals and operating procedures. | Telegram-native querying, zero setup, offline-capable responses. |
-| **Team Administrator** | Manages organizational documentation, assigns member access, and audits security. | Web dashboard, role-based access control, file lifecycle management. |
+| Persona                           | Description                                                                          | Primary Needs                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| **Knowledge Worker / Researcher** | Accesses scientific papers, technical specs, and project briefs on mobile on the go. | Fast answers, accurate citations, PDF summarization.                 |
+| **Field Support / Operations**    | Engineers in the field requiring instant equipment manuals and operating procedures. | Telegram-native querying, zero setup, offline-capable responses.     |
+| **Team Administrator**            | Manages organizational documentation, assigns member access, and audits security.    | Web dashboard, role-based access control, file lifecycle management. |
 
 ---
 
@@ -53,6 +55,7 @@
 ### 5.1 Core Features (Functional)
 
 #### 5.1.1 Telegram Assistant Interface
+
 - **Commands**:
   - `/start` - Initial onboarding, user registration, and tutorial.
   - `/ask <question>` - Natural language query against indexed knowledge.
@@ -65,6 +68,7 @@
 - **Source Citation**: Every AI response generated from indexed documents must include footnote citations referencing document title, section, and page/chunk index.
 
 #### 5.1.2 Retrieval-Augmented Generation (RAG) Engine
+
 - **Multi-Format Ingestion**: PDF, Markdown, Plain Text, and DOCX.
 - **Recursive Semantic Chunking**: Chunk size target of 512 tokens with 64-token overlap, preserving semantic sentence boundaries.
 - **Vector Embedding**: Integration with Google Gemini `text-embedding-004` (768 dimensions).
@@ -72,6 +76,7 @@
 - **Context Window Management**: Dynamic ranking and prompt assembly to prevent context window overflow.
 
 #### 5.1.3 Administration Dashboard (Web)
+
 - Modern Next.js interface for workspace administrators.
 - Document repository manager: upload, re-index, delete, and inspect chunk embeddings.
 - User management: assign roles (`SUPER_ADMIN`, `ADMIN`, `MEMBER`, `VIEWER`).

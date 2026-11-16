@@ -5,6 +5,7 @@ All engineering tasks are grouped by milestone and tracked via Markdown checklis
 ---
 
 ## Phase 0: Project Inception & Foundation Scaffolding
+
 - [x] Create monorepo directory structure (`apps/`, `packages/`, `docs/`, `docker/`, `scripts/`).
 - [x] Configure root `package.json`, `pnpm-workspace.yaml`, and `tsconfig.base.json`.
 - [x] Generate comprehensive `.gitignore` and `LICENSE` (MIT).
@@ -19,6 +20,7 @@ All engineering tasks are grouped by milestone and tracked via Markdown checklis
 ---
 
 ## Phase 1: Database Architecture & pgvector Integration
+
 - [ ] Initialize Prisma schema in `packages/database/prisma/schema.prisma`.
 - [ ] Configure PostgreSQL extensions: `vector`, `uuid-ossp`, `pg_trgm`.
 - [ ] Create initial migration with `prisma migrate dev`.
@@ -29,6 +31,7 @@ All engineering tasks are grouped by milestone and tracked via Markdown checklis
 ---
 
 ## Phase 2: Core API Gateway & Telegram Ingress
+
 - [ ] Implement NestJS application bootstrap in `apps/api/src/main.ts`.
 - [ ] Implement `@telemind/config` configuration module with Zod validation.
 - [ ] Create Telegram webhook controller in `apps/api/src/telegram/`.
@@ -44,6 +47,7 @@ All engineering tasks are grouped by milestone and tracked via Markdown checklis
 ---
 
 ## Phase 3: BullMQ Worker & Distributed Queue Infrastructure
+
 - [ ] Bootstrap BullMQ worker application in `apps/worker/src/main.ts`.
 - [ ] Configure BullMQ processor for `telemind:telegram:ingest` queue.
 - [ ] Configure processor for `telemind:rag:indexing` queue.
@@ -55,6 +59,7 @@ All engineering tasks are grouped by milestone and tracked via Markdown checklis
 ---
 
 ## Phase 4: Google Gemini AI Integration Layer
+
 - [ ] Initialize `@google/genai` client in `packages/ai`.
 - [ ] Implement text generation wrapper with support for Gemini 1.5 Pro and Flash.
 - [ ] Implement vector embedding generator using `text-embedding-004` (768 dimensions).
@@ -65,6 +70,7 @@ All engineering tasks are grouped by milestone and tracked via Markdown checklis
 ---
 
 ## Phase 5: RAG Ingestion & Vector Retrieval Pipeline
+
 - [ ] Implement document text extractor in `packages/rag` (PDF, TXT, Markdown).
 - [ ] Implement recursive character text chunker with configurable token size & overlap.
 - [ ] Build chunk embedding worker to batch embed and persist into `document_chunks`.
@@ -76,6 +82,7 @@ All engineering tasks are grouped by milestone and tracked via Markdown checklis
 ---
 
 ## Phase 6: Telegram Bot Interactive UX & Commands
+
 - [ ] Set up Telegraf bot instance in `packages/telegram`.
 - [ ] Implement command router:
   - [ ] `/start` - Welcome message & quick onboarding.
@@ -91,6 +98,7 @@ All engineering tasks are grouped by milestone and tracked via Markdown checklis
 ---
 
 ## Phase 7: Web Administration Dashboard
+
 - [ ] Bootstrap Next.js 14 project in `apps/dashboard` with Tailwind CSS.
 - [ ] Build login page with JWT authentication state management.
 - [ ] Build Knowledge Base view:
@@ -103,6 +111,7 @@ All engineering tasks are grouped by milestone and tracked via Markdown checklis
 ---
 
 ## Phase 8: Enterprise Security Hardening & Audit
+
 - [ ] Configure Helmet HTTP security headers in API.
 - [ ] Configure strict CORS origin whitelisting.
 - [ ] Implement NestJS Throttler rate limiting (IP-based and user-based).
@@ -113,6 +122,7 @@ All engineering tasks are grouped by milestone and tracked via Markdown checklis
 ---
 
 ## Phase 9: Production Deployment, Monitoring & CI/CD
+
 - [ ] Finalize multi-stage Docker build containers with non-root security.
 - [ ] Configure Nginx reverse proxy with SSL termination and rate limiting zones.
 - [ ] Set up GitHub Actions workflow for automated container build and registry push.
@@ -123,6 +133,7 @@ All engineering tasks are grouped by milestone and tracked via Markdown checklis
 ---
 
 ## Phase 10: Multimodal AI & Advanced Capabilities
+
 - [ ] Implement audio voice note processing (transcription via Gemini Audio).
 - [ ] Support image/infographic extraction from PDF documents.
 - [ ] Add conversational memory summarization for long-running chat sessions.

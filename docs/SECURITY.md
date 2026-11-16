@@ -9,12 +9,14 @@
 ## 1. Authentication & Session Security
 
 ### 1.1 JSON Web Tokens (JWT) Architecture
+
 - **Short-Lived Access Tokens**: Issued with an expiration of 15 minutes (`JWT_EXPIRATION=15m`).
 - **Cryptographic Signature**: Signed with HMAC SHA-256 using a minimum 64-character high-entropy secret (`JWT_SECRET`).
 - **Refresh Token Rotation**: Refresh tokens (`JWT_REFRESH_EXPIRATION=7d`) are stored as single-use hashes in the database. When a refresh token is used, it is revoked and replaced with a new pair.
 - **Revocation**: If a token compromise is detected, users can invalidate all active sessions immediately.
 
 ### 1.2 Telegram Authentication & Webhook Verification
+
 - Webhooks received from Telegram must contain the `X-Telegram-Bot-Api-Secret-Token` header.
 - The webhook controller compares the received token against `TELEGRAM_WEBHOOK_SECRET` using a constant-time comparison algorithm (`crypto.timingSafeEqual`) to prevent timing attacks.
 
@@ -24,12 +26,12 @@
 
 TeleMind enforces strict RBAC across all REST and Dashboard endpoints:
 
-| Role | Permissions |
-|---|---|
-| `SUPER_ADMIN` | Full system control: manages administrators, global configs, and audit logs. |
-| `ADMIN` | Manages knowledge bases, uploads/deletes documents, views workspace analytics. |
-| `MEMBER` | Can query knowledge bases, upload documents to their assigned group, and chat. |
-| `VIEWER` | Read-only access to search and view document summaries. |
+| Role          | Permissions                                                                    |
+| ------------- | ------------------------------------------------------------------------------ |
+| `SUPER_ADMIN` | Full system control: manages administrators, global configs, and audit logs.   |
+| `ADMIN`       | Manages knowledge bases, uploads/deletes documents, views workspace analytics. |
+| `MEMBER`      | Can query knowledge bases, upload documents to their assigned group, and chat. |
+| `VIEWER`      | Read-only access to search and view document summaries.                        |
 
 Role checking is enforced via NestJS `RolesGuard` and decorators applied to controller handlers.
 
@@ -90,6 +92,7 @@ Role checking is enforced via NestJS `RolesGuard` and decorators applied to cont
 ## 8. File Upload Security
 
 Documents uploaded via web or Telegram chat pass rigorous security controls before indexing:
+
 1. **File Size Capping**: Hard limit of 25MB per file enforced at reverse proxy and application layer.
 2. **MIME & Extension Whitelisting**: Allowed types strictly limited to:
    - `application/pdf` (`.pdf`)

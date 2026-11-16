@@ -24,13 +24,17 @@
 ## 2. Authentication & Authorization
 
 ### 2.1 Standard API Endpoints
+
 All protected endpoints require the HTTP `Authorization` header containing a valid JSON Web Token:
+
 ```http
 Authorization: Bearer <jwt_access_token>
 ```
 
 ### 2.2 Telegram Webhook Endpoint
+
 The Telegram webhook endpoint (`POST /api/v1/telegram/webhook`) is protected via the secret token header:
+
 ```http
 X-Telegram-Bot-Api-Secret-Token: <configured_telegram_webhook_secret>
 ```
@@ -40,6 +44,7 @@ X-Telegram-Bot-Api-Secret-Token: <configured_telegram_webhook_secret>
 ## 3. Standard Envelope & Error Format
 
 ### 3.1 Success Response Envelope
+
 ```json
 {
   "success": true,
@@ -57,6 +62,7 @@ X-Telegram-Bot-Api-Secret-Token: <configured_telegram_webhook_secret>
 ```
 
 ### 3.2 Error Response Format (RFC 7807 Compliant)
+
 ```json
 {
   "success": false,
@@ -77,34 +83,37 @@ X-Telegram-Bot-Api-Secret-Token: <configured_telegram_webhook_secret>
 
 ## 4. Planned Endpoints Summary
 
-| Method | Endpoint | Description | Auth Required |
-|---|---|---|---|
-| `POST` | `/telegram/webhook` | Telegram webhook ingress point | Webhook Secret |
-| `POST` | `/auth/login` | User credentials exchange for JWT | No |
-| `POST` | `/auth/refresh` | Refresh expired access token | Refresh Token |
-| `GET` | `/auth/me` | Fetch active user profile | Bearer JWT |
-| `GET` | `/knowledge-bases` | List available knowledge bases | Bearer JWT |
-| `POST` | `/knowledge-bases` | Create new knowledge base | Bearer JWT (Admin) |
-| `GET` | `/documents` | List documents with pagination & filter | Bearer JWT |
-| `POST` | `/documents/upload` | Multipart file upload for indexing | Bearer JWT |
-| `GET` | `/documents/:id` | Get document details and chunk status | Bearer JWT |
-| `DELETE` | `/documents/:id` | Delete document and delete vector chunks | Bearer JWT (Admin) |
-| `POST` | `/search/query` | Direct semantic search against knowledge | Bearer JWT |
-| `GET` | `/health` | System liveness & readiness check | No |
+| Method   | Endpoint            | Description                              | Auth Required      |
+| -------- | ------------------- | ---------------------------------------- | ------------------ |
+| `POST`   | `/telegram/webhook` | Telegram webhook ingress point           | Webhook Secret     |
+| `POST`   | `/auth/login`       | User credentials exchange for JWT        | No                 |
+| `POST`   | `/auth/refresh`     | Refresh expired access token             | Refresh Token      |
+| `GET`    | `/auth/me`          | Fetch active user profile                | Bearer JWT         |
+| `GET`    | `/knowledge-bases`  | List available knowledge bases           | Bearer JWT         |
+| `POST`   | `/knowledge-bases`  | Create new knowledge base                | Bearer JWT (Admin) |
+| `GET`    | `/documents`        | List documents with pagination & filter  | Bearer JWT         |
+| `POST`   | `/documents/upload` | Multipart file upload for indexing       | Bearer JWT         |
+| `GET`    | `/documents/:id`    | Get document details and chunk status    | Bearer JWT         |
+| `DELETE` | `/documents/:id`    | Delete document and delete vector chunks | Bearer JWT (Admin) |
+| `POST`   | `/search/query`     | Direct semantic search against knowledge | Bearer JWT         |
+| `GET`    | `/health`           | System liveness & readiness check        | No                 |
 
 ---
 
 ## 5. Detailed Endpoint Contracts
 
 ### 5.1 Document Upload
+
 - **`POST /documents/upload`**
 - **Content-Type**: `multipart/form-data`
 
 #### Request:
+
 - Form Field `file`: Binary file (PDF, TXT, MD).
 - Form Field `knowledgeBaseId`: UUID (optional).
 
 #### Response (HTTP 202 Accepted):
+
 ```json
 {
   "success": true,
@@ -124,10 +133,12 @@ X-Telegram-Bot-Api-Secret-Token: <configured_telegram_webhook_secret>
 ---
 
 ### 5.2 Direct Semantic Search Query
+
 - **`POST /search/query`**
 - **Content-Type**: `application/json`
 
 #### Request Body:
+
 ```json
 {
   "query": "What are the SLA requirements for API response times?",
@@ -138,6 +149,7 @@ X-Telegram-Bot-Api-Secret-Token: <configured_telegram_webhook_secret>
 ```
 
 #### Response (HTTP 200 OK):
+
 ```json
 {
   "success": true,

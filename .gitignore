@@ -96,3 +96,7 @@ scratch/
 uploads/
 storage/
 temp_uploads/
+
+# WhatsApp Web Session & Chrome Data (Private Session & Locked Files)
+.wwebjs_auth/
+.wwebjs_cache/

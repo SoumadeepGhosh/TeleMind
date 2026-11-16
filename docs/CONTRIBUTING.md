@@ -19,6 +19,7 @@ All branches must branch off `develop` (or `main` for critical production hotfix
 ```
 
 ### Allowed Types
+
 - `feat/`: A new user-facing feature or API capability (e.g., `feat/12-rag-chunking`).
 - `fix/`: A bug fix (e.g., `fix/45-webhook-signature-check`).
 - `refactor/`: Code reorganization without functional changes (e.g., `refactor/88-logger-service`).
@@ -42,6 +43,7 @@ Commit messages must strictly follow the [Conventional Commits v1.0.0](https://w
 ```
 
 ### Examples
+
 - `feat(rag): add recursive semantic chunker with configurable token overlap`
 - `fix(telegram): escape markdown v2 reserved characters in assistant output`
 - `perf(database): create hnsw index on document_chunks embedding column`
@@ -76,6 +78,7 @@ Commit messages must strictly follow the [Conventional Commits v1.0.0](https://w
 ## 6. Code Review Standards
 
 Every pull request requires approval from at least one core maintainer. Reviewers evaluate:
+
 - **Architectural Alignment**: Does the code respect package boundaries and ADRs?
 - **Security**: Are inputs validated? Are queries parameterized? Are secrets protected?
 - **Test Coverage**: Does the PR include adequate unit and integration tests?

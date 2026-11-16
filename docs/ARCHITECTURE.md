@@ -41,7 +41,7 @@ graph TB
     TG_GW -->|Webhook Update| NGINX
     WEB -->|REST / HTTPS| NGINX
     NGINX -->|Reverse Proxy| API
-    
+
     API -->|Push Task (Async)| REDIS
     API -->|Read/Write Metadata| PG
     API -->|Upload Files| STORAGE
@@ -98,18 +98,18 @@ graph LR
 
 ### Component Roles & Responsibilities
 
-| Component | Technology | Responsibility |
-|---|---|---|
-| `apps/api` | NestJS, Express, Passport | Webhook receiver, REST API endpoints, JWT authentication, rate limiting. |
-| `apps/worker` | NestJS, BullMQ | Asynchronous job processors for message processing, RAG indexing, AI querying. |
-| `apps/dashboard` | Next.js 14, Tailwind CSS | Admin interface for knowledge base management, user administration, and system metrics. |
-| `packages/database` | Prisma ORM, PostgreSQL | Unified database access layer, schema definitions, migrations, and vector types. |
-| `packages/ai` | Google GenAI SDK | Client wrapper for Gemini 1.5 Pro, Flash, and `text-embedding-004`. |
-| `packages/telegram` | Telegraf | Telegram Bot API client, command dispatchers, keyboard builders, and webhook validator. |
-| `packages/rag` | TypeScript, pdf-parse | Ingestion, recursive chunking, embedding generation, vector similarity search, and context assembly. |
-| `packages/shared` | TypeScript, Zod | Shared interfaces, DTOs, API contracts, errors, and validation schemas. |
-| `packages/config` | Zod, dotenv | Validated environment configuration loaded once at process startup. |
-| `packages/logger` | Pino | Structured JSON logging with trace context and redaction. |
+| Component           | Technology                | Responsibility                                                                                       |
+| ------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `apps/api`          | NestJS, Express, Passport | Webhook receiver, REST API endpoints, JWT authentication, rate limiting.                             |
+| `apps/worker`       | NestJS, BullMQ            | Asynchronous job processors for message processing, RAG indexing, AI querying.                       |
+| `apps/dashboard`    | Next.js 14, Tailwind CSS  | Admin interface for knowledge base management, user administration, and system metrics.              |
+| `packages/database` | Prisma ORM, PostgreSQL    | Unified database access layer, schema definitions, migrations, and vector types.                     |
+| `packages/ai`       | Google GenAI SDK          | Client wrapper for Gemini 1.5 Pro, Flash, and `text-embedding-004`.                                  |
+| `packages/telegram` | Telegraf                  | Telegram Bot API client, command dispatchers, keyboard builders, and webhook validator.              |
+| `packages/rag`      | TypeScript, pdf-parse     | Ingestion, recursive chunking, embedding generation, vector similarity search, and context assembly. |
+| `packages/shared`   | TypeScript, Zod           | Shared interfaces, DTOs, API contracts, errors, and validation schemas.                              |
+| `packages/config`   | Zod, dotenv               | Validated environment configuration loaded once at process startup.                                  |
+| `packages/logger`   | Pino                      | Structured JSON logging with trace context and redaction.                                            |
 
 ---
 
@@ -133,7 +133,7 @@ sequenceDiagram
     Note over API: 1. Validate Secret Token<br/>2. Verify Rate Limits<br/>3. Parse Update
     API->>Redis: Enqueue Job into "telemind:telegram:ingest"
     API-->>TG: HTTP 200 OK (Immediate Acknowledgment)
-    
+
     Worker->>Redis: Dequeue Job
     Worker->>TG: Send Chat Action ("typing...")
     Worker->>DB: Fetch User Chat History & Context
@@ -158,7 +158,7 @@ stateDiagram-v2
     WebhookReceived --> SignatureValidation: Verify X-Telegram-Bot-Api-Secret-Token
     SignatureValidation --> Dropped: Invalid Signature (403)
     SignatureValidation --> RateCheck: Valid Signature
-    
+
     RateCheck --> RateLimited: Limit Exceeded (HTTP 429)
     RateCheck --> EnqueueJob: Rate Limit OK
     EnqueueJob --> Return200: Push to BullMQ
@@ -170,12 +170,12 @@ stateDiagram-v2
         ParseMessageType --> HandleCommand: Is Command (/ask, /index, /clear)
         ParseMessageType --> HandleDocument: Is File Attachment (PDF, TXT)
         ParseMessageType --> HandlePlainMessage: Plain Conversation
-        
+
         HandleCommand --> ProcessRAGQuery: /ask
         HandleCommand --> SessionReset: /clear
         HandleDocument --> IngestDocument: Validate & Store
         HandlePlainMessage --> ContextualLLMReply
-        
+
         ProcessRAGQuery --> DispatchTelegramReply
         SessionReset --> DispatchTelegramReply
         IngestDocument --> DispatchTelegramReply

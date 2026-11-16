@@ -18,14 +18,14 @@ TeleMind enforces strict encapsulation between deployable applications and inter
 
 ## 2. Naming Conventions
 
-| Category | Convention | Example |
-|---|---|---|
-| **Files & Folders** | `kebab-case` | `document-chunker.service.ts`, `telegram-webhook.controller.ts` |
-| **Classes & Interfaces** | `PascalCase` | `DocumentChunkerService`, `TelegramMessagePayload` |
-| **Methods & Variables** | `camelCase` | `generateEmbedding()`, `activeChatSession` |
-| **Constants & Enums** | `UPPER_SNAKE_CASE` | `MAX_RETRY_ATTEMPTS`, `DocumentStatus.INDEXED` |
-| **Type Aliases** | `PascalCase` | `VectorEmbedding`, `SimilaritySearchResult` |
-| **Database Tables & Columns** | `snake_case` | `document_chunks`, `created_at` |
+| Category                      | Convention         | Example                                                         |
+| ----------------------------- | ------------------ | --------------------------------------------------------------- |
+| **Files & Folders**           | `kebab-case`       | `document-chunker.service.ts`, `telegram-webhook.controller.ts` |
+| **Classes & Interfaces**      | `PascalCase`       | `DocumentChunkerService`, `TelegramMessagePayload`              |
+| **Methods & Variables**       | `camelCase`        | `generateEmbedding()`, `activeChatSession`                      |
+| **Constants & Enums**         | `UPPER_SNAKE_CASE` | `MAX_RETRY_ATTEMPTS`, `DocumentStatus.INDEXED`                  |
+| **Type Aliases**              | `PascalCase`       | `VectorEmbedding`, `SimilaritySearchResult`                     |
+| **Database Tables & Columns** | `snake_case`       | `document_chunks`, `created_at`                                 |
 
 ---
 
@@ -40,9 +40,7 @@ TeleMind enforces strict encapsulation between deployable applications and inter
 
 ```typescript
 // GOOD
-export async function findDocumentById(
-  documentId: string
-): Promise<DocumentEntity | null> {
+export async function findDocumentById(documentId: string): Promise<DocumentEntity | null> {
   return prisma.document.findUnique({ where: { id: documentId } });
 }
 
@@ -60,7 +58,11 @@ export async function findDocumentById(documentId: any) {
 - **Custom Domain Exceptions**: Throw typed domain exceptions extending a base `TeleMindException` class:
   ```typescript
   export class DocumentIndexingException extends TeleMindException {
-    constructor(message: string, public readonly documentId: string, cause?: Error) {
+    constructor(
+      message: string,
+      public readonly documentId: string,
+      cause?: Error,
+    ) {
       super(message, ErrorCode.DOCUMENT_INDEXING_FAILED, 500, cause);
     }
   }
@@ -77,11 +79,11 @@ export async function findDocumentById(documentId: any) {
   // GOOD
   this.logger.info(
     { documentId, chunkCount: chunks.length, durationMs },
-    "Document chunking completed successfully"
+    'Document chunking completed successfully',
   );
 
   // BAD
-  console.log("Chunked document " + documentId);
+  console.log('Chunked document ' + documentId);
   ```
 - **Sensitive Data Scrubbing**: Never log raw passwords, authorization headers, Telegram webhook secrets, or unredacted PII.
 

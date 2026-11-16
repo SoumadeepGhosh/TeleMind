@@ -28,7 +28,7 @@ pie title Test Distribution Strategy
   ```typescript
   describe('RecursiveTextChunker', () => {
     it('should split text into chunks within the maximum token limit', () => {
-      const text = "Sample enterprise document text...";
+      const text = 'Sample enterprise document text...';
       const chunker = new RecursiveTextChunker({ maxTokens: 512, overlapTokens: 64 });
       const chunks = chunker.chunk(text);
       expect(chunks.length).toBeGreaterThan(0);
@@ -56,15 +56,16 @@ pie title Test Distribution Strategy
 
 ## 5. Coverage Goals & Quality Gates
 
-| Component | Minimum Line Coverage | Minimum Branch Coverage |
-|---|---|---|
-| `packages/rag` | 90% | 85% |
-| `packages/ai` | 90% | 85% |
-| `packages/telegram` | 85% | 80% |
-| `packages/database` | 85% | 80% |
-| `packages/shared` | 95% | 90% |
-| `apps/api` | 80% | 75% |
-| `apps/worker` | 80% | 75% |
+| Component           | Minimum Line Coverage | Minimum Branch Coverage |
+| ------------------- | --------------------- | ----------------------- |
+| `packages/rag`      | 90%                   | 85%                     |
+| `packages/ai`       | 90%                   | 85%                     |
+| `packages/telegram` | 85%                   | 80%                     |
+| `packages/database` | 85%                   | 80%                     |
+| `packages/shared`   | 95%                   | 90%                     |
+| `apps/api`          | 80%                   | 75%                     |
+| `apps/worker`       | 80%                   | 75%                     |
 
 ### Enforcing Quality in CI
+
 Pull requests fail automated checks if overall monorepo test coverage drops below 85% or if any single test fails.

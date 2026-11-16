@@ -1,9 +1,8 @@
-version: '3.9'
+# ==============================================================================
+# TeleMind - Docker Infrastructure (PostgreSQL with pgvector + Redis)
+# ==============================================================================
 
 services:
-  # ----------------------------------------------------------------------------
-  # PostgreSQL 16 with pgvector extension enabled
-  # ----------------------------------------------------------------------------
   postgres:
     image: pgvector/pgvector:pg16
     container_name: telemind-postgres
@@ -22,12 +21,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     networks:
       - telemind-network
 
-  # ----------------------------------------------------------------------------
-  # Redis 7 with Persistence for BullMQ & Caching
-  # ----------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
     container_name: telemind-redis
@@ -47,90 +44,17 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - telemind-network
-
-  # ----------------------------------------------------------------------------
-  # TeleMind API Server (NestJS)
-  # ----------------------------------------------------------------------------
-  api:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.api
-      target: production
-    container_name: telemind-api
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      NODE_ENV: production
-      PORT: 3000
-      POSTGRES_HOST: postgres
-      REDIS_HOST: redis
-    ports:
-      - "${PORT:-3000}:3000"
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/v1/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - telemind-network
-
-  # ----------------------------------------------------------------------------
-  # TeleMind Background Worker (BullMQ & Rag Processing)
-  # ----------------------------------------------------------------------------
-  worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.worker
-      target: production
-    container_name: telemind-worker
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      NODE_ENV: production
-      POSTGRES_HOST: postgres
-      REDIS_HOST: redis
-    networks:
-      - telemind-network
-
-  # ----------------------------------------------------------------------------
-  # TeleMind Admin Dashboard (Next.js)
-  # ----------------------------------------------------------------------------
-  dashboard:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.dashboard
-      target: production
-    container_name: telemind-dashboard
-    restart: unless-stopped
-    depends_on:
-      - api
-    env_file:
-      - .env
-    ports:
-      - "3001:3000"
+      start_period: 5s
     networks:
       - telemind-network
 
 networks:
   telemind-network:
+    name: telemind_network
     driver: bridge
 
 volumes:
   postgres_data:
-    driver: local
+    name: telemind_postgres_data
   redis_data:
-    driver: local
+    name: telemind_redis_data
