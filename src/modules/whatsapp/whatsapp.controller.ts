@@ -36,6 +36,40 @@ export class WhatsappController {
       return;
     }
 
+    if (this.whatsapp.initError) {
+      res.type('html').send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <title>WhatsApp Error - Soumadeep AI</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; padding: 1rem; }
+            .card { background: #1e293b; padding: 2rem; border-radius: 1.25rem; text-align: center; max-width: 520px; border: 1px solid #ef4444; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
+            h2 { color: #f87171; margin-top: 0; }
+            p { color: #94a3b8; line-height: 1.5; }
+            pre { background: #0f172a; padding: 1rem; border-radius: 0.5rem; color: #fca5a5; font-size: 0.82rem; text-align: left; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+            .tip { background: #0369a1; color: white; padding: 0.75rem; border-radius: 0.5rem; font-size: 0.85rem; margin-top: 1rem; text-align: left; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2>⚠️ WhatsApp Client Error</h2>
+            <p>The browser could not initialize on the server:</p>
+            <pre>${this.whatsapp.initError}</pre>
+            <div class="tip">
+              💡 <b>How to fix on Render:</b><br>
+              In Render Settings ➡️ Environment, set:<br>
+              <code>PUPPETEER_CACHE_DIR=/opt/render/.cache/puppeteer</code>
+            </div>
+          </div>
+        </body>
+        </html>
+      `);
+      return;
+    }
+
     if (!this.whatsapp.latestQr) {
       res.type('html').send(`
         <!DOCTYPE html>

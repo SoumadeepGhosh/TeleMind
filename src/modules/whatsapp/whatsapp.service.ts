@@ -18,6 +18,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private readonly userStates = new Map<string, { action: PendingAction; timestamp: number }>();
   public latestQr: string | null = null;
   public isConnected = false;
+  public initError: string | null = null;
 
   constructor(
     private readonly ai: AiService,
@@ -151,6 +152,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
     const chromePath =
       process.env.CHROME_BIN ||
+      process.env.PUPPETEER_EXECUTABLE_PATH ||
       (process.platform === 'win32'
         ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
         : undefined);
@@ -167,6 +169,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
           '--disable-accelerated-2d-canvas',
           '--no-first-run',
           '--no-zygote',
+          '--single-process',
           '--disable-gpu',
         ],
       },
@@ -232,6 +235,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     // Initialize client
     this.client.initialize().catch((err: unknown) => {
       const errorMsg = err instanceof Error ? err.message : String(err);
+      this.initError = errorMsg;
       this.logger.error(`Failed to initialize WhatsApp client: ${errorMsg}`);
     });
   }
