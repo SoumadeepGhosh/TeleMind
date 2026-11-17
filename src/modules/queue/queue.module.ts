@@ -13,14 +13,31 @@ export * from './queue.constants';
 dotenv.config();
 
 function getRedisConnection() {
+  if (process.env.REDIS_URL) {
+    try {
+      const parsedUrl = new URL(process.env.REDIS_URL);
+      return {
+        host: parsedUrl.hostname,
+        port: parseInt(parsedUrl.port || '6379', 10),
+        username: parsedUrl.username ? decodeURIComponent(parsedUrl.username) : undefined,
+        password: parsedUrl.password ? decodeURIComponent(parsedUrl.password) : undefined,
+        tls: parsedUrl.protocol === 'rediss:' ? {} : undefined,
+      };
+    } catch {
+      // Fall through
+    }
+  }
+
   const host = process.env.REDIS_HOST || 'localhost';
   const port = parseInt(process.env.REDIS_PORT || '6379', 10);
   const password = process.env.REDIS_PASSWORD || undefined;
+  const isTls = host.includes('upstash.io') || process.env.REDIS_TLS === 'true';
 
   return {
     host,
     port,
     ...(password ? { password } : {}),
+    ...(isTls ? { tls: {} } : {}),
   };
 }
 
