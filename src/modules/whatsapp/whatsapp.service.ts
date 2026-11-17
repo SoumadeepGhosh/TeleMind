@@ -16,6 +16,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(WhatsappService.name);
   private client!: Client;
   private readonly userStates = new Map<string, { action: PendingAction; timestamp: number }>();
+  public latestQr: string | null = null;
+  public isConnected = false;
 
   constructor(
     private readonly ai: AiService,
@@ -148,36 +150,59 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('📱 Initializing WhatsApp Web Client...');
 
     const chromePath =
-      process.env.CHROME_BIN || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+      process.env.CHROME_BIN ||
+      (process.platform === 'win32'
+        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+        : undefined);
 
     this.client = new Client({
       authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
       puppeteer: {
         headless: true,
-        executablePath: chromePath,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+        ...(chromePath ? { executablePath: chromePath } : {}),
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+        ],
       },
     });
 
     // 1. QR Code generated event
     this.client.on('qr', (qr) => {
-      this.logger.log('📲 QR Code received! Scan this with your WhatsApp:');
+      this.latestQr = qr;
+      this.isConnected = false;
+      this.logger.log('📲 QR Code generated! Open /api/v1/whatsapp/qr or scan in console:');
       qrcode.generate(qr, { small: true });
     });
 
     // 2. Ready event
     this.client.on('ready', () => {
+      this.isConnected = true;
+      this.latestQr = null;
       this.logger.log('🚀 WhatsApp Bot is connected and ready!');
     });
 
     // 3. Authenticated
     this.client.on('authenticated', () => {
+      this.isConnected = true;
+      this.latestQr = null;
       this.logger.log('✅ WhatsApp session authenticated successfully!');
     });
 
     // 4. Auth failure
     this.client.on('auth_failure', (msg) => {
+      this.isConnected = false;
       this.logger.error(`❌ WhatsApp auth failure: ${msg}`);
+    });
+
+    this.client.on('disconnected', (reason) => {
+      this.isConnected = false;
+      this.logger.warn(`⚠️ WhatsApp disconnected: ${reason}`);
     });
 
     // 5. Incoming message handler from other people
