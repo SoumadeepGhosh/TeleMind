@@ -32,10 +32,15 @@ export class RagService {
     // 1. Split text into chunks (~500 characters with simple sentence preservation)
     const chunks = this.chunkText(text, 500);
 
+    const defaultKb = await this.prisma.knowledgeBase.findFirst({
+      where: { slug: 'default' },
+    });
+
     // 2. Create the parent Document record
     const doc = await this.prisma.document.create({
       data: {
         title,
+        knowledgeBaseId: defaultKb?.id,
         fileKey: `inline://${title.toLowerCase().replace(/\s+/g, '-')}`,
         fileSize: fileSize ?? Buffer.byteLength(text, 'utf-8'),
         mimeType,
@@ -71,6 +76,23 @@ export class RagService {
       where: { id: doc.id },
       data: { status: 'INDEXED' },
     });
+
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          action: 'DOCUMENT_INDEXED',
+          resource: 'Document',
+          details: {
+            documentId: doc.id,
+            title,
+            totalChunks: chunks.length,
+            fileSize: fileSize ?? 0,
+          },
+        },
+      });
+    } catch {
+      // Non-fatal
+    }
 
     this.logger.log(`✅ Successfully indexed "${title}" with ${chunks.length} vector chunks`);
     return { documentId: doc.id, chunkCount: chunks.length };
@@ -193,27 +215,55 @@ export class RagService {
   }
 
   /**
-   * Deletes a document by title or ID, cascade-deleting all associated vector chunks
+   * Deletes a document by title, partial title, index number, or ID, cascade-deleting all associated vector chunks
    */
   async deleteDocument(titleOrId: string): Promise<{ deleted: boolean; title: string }> {
-    // 1. Find document by ID or case-insensitive title
-    const doc = await this.prisma.document.findFirst({
+    const trimmed = titleOrId.trim();
+
+    // 1. If user passed a number (e.g. "1"), delete by index from recent documents
+    if (/^\d+$/.test(trimmed)) {
+      const index = parseInt(trimmed, 10) - 1;
+      const docs = await this.listDocuments();
+      if (index >= 0 && index < docs.length) {
+        const targetDoc = docs[index];
+        await this.prisma.document.delete({ where: { id: targetDoc.id } });
+        this.logger.log(`🗑️ Deleted document #${trimmed} "${targetDoc.title}"`);
+        return { deleted: true, title: targetDoc.title };
+      }
+    }
+
+    // 2. Find document by ID, exact title, or partial title (case-insensitive)
+    let doc = await this.prisma.document.findFirst({
       where: {
         OR: [
-          { id: titleOrId.length === 36 ? titleOrId : undefined },
-          { title: { equals: titleOrId, mode: 'insensitive' } },
+          { id: trimmed.length === 36 ? trimmed : undefined },
+          { title: { equals: trimmed, mode: 'insensitive' } },
+          { title: { contains: trimmed, mode: 'insensitive' } },
         ],
       },
+      orderBy: { createdAt: 'desc' },
     });
 
     if (!doc) {
-      return { deleted: false, title: titleOrId };
+      return { deleted: false, title: trimmed };
     }
 
-    // 2. Delete parent document (PostgreSQL cascade-deletes all vector chunks)
+    // 3. Delete parent document (PostgreSQL cascade-deletes all vector chunks)
     await this.prisma.document.delete({
       where: { id: doc.id },
     });
+
+    try {
+      await this.prisma.auditLog.create({
+        data: {
+          action: 'DOCUMENT_DELETED',
+          resource: 'Document',
+          details: { documentId: doc.id, title: doc.title },
+        },
+      });
+    } catch {
+      // Non-fatal
+    }
 
     this.logger.log(`🗑️ Deleted document "${doc.title}" and its vector chunks`);
     return { deleted: true, title: doc.title };

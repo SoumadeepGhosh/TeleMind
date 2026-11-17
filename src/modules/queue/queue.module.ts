@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { BullBoardModule } from '@bull-board/nestjs';
+import { ExpressAdapter } from '@bull-board/express';
+import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import * as dotenv from 'dotenv';
 import { RagModule } from '../rag/rag.module';
 import { DocumentProcessor } from './document.processor';
@@ -38,6 +41,14 @@ function getRedisConnection() {
         removeOnComplete: 100,
         removeOnFail: 500,
       },
+    }),
+    BullBoardModule.forRoot({
+      route: '/admin/queues',
+      adapter: ExpressAdapter,
+    }),
+    BullBoardModule.forFeature({
+      name: DOCUMENT_QUEUE_NAME,
+      adapter: BullMQAdapter,
     }),
   ],
   providers: [DocumentProcessor],

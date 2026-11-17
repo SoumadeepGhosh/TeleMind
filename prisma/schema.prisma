@@ -115,6 +115,51 @@ model TelegramMessage {
   @@map("telegram_messages")
 }
 
+model WhatsappUser {
+  id          String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  jid         String            @unique @db.VarChar(100)
+  phoneNumber String?           @db.VarChar(50)
+  name        String?           @db.VarChar(255)
+  createdAt   DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime          @updatedAt @db.Timestamptz(6)
+
+  messages    WhatsappMessage[]
+
+  @@index([jid])
+  @@map("whatsapp_users")
+}
+
+model WhatsappChat {
+  id          String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  chatJid     String            @unique @db.VarChar(100)
+  name        String?           @db.VarChar(255)
+  isGroup     Boolean           @default(false)
+  createdAt   DateTime          @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime          @updatedAt @db.Timestamptz(6)
+
+  messages    WhatsappMessage[]
+
+  @@index([chatJid])
+  @@map("whatsapp_chats")
+}
+
+model WhatsappMessage {
+  id             String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  whatsappChatId String        @db.Uuid
+  whatsappUserId String?       @db.Uuid
+  messageId      String        @db.VarChar(255)
+  role           MessageRole   @default(USER)
+  text           String        @db.Text
+  mediaType      String?       @db.VarChar(50)
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+
+  whatsappChat   WhatsappChat  @relation(fields: [whatsappChatId], references: [id], onDelete: Cascade)
+  whatsappUser   WhatsappUser? @relation(fields: [whatsappUserId], references: [id], onDelete: SetNull)
+
+  @@index([whatsappChatId, createdAt(sort: Desc)])
+  @@map("whatsapp_messages")
+}
+
 model KnowledgeBase {
   id          String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   name        String       @db.VarChar(255)

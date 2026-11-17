@@ -52,9 +52,9 @@
   - **Chunking Pipeline**: Sliding-window chunker with 150-character overlap for optimal document context preservation.
   - **Supported Documents**: PDF, Plain Text, and Markdown.
 
-- **⚙️ Asynchronous BullMQ Queue**:
+- **⚙️ Asynchronous BullMQ Queue & Visual Dashboard**:
   - Background document indexing jobs (`document-indexing`) powered by **BullMQ** and **Redis**.
-  - Prevents bot timeout or freeze during large PDF uploads and multi-chunk embedding generations.
+  - **Live Bull-Board Dashboard**: Inspect queues, job statuses, and retry failed tasks in your browser at `http://localhost:3060/admin/queues`.
 
 - **🚀 PM2 Production Daemon**:
   - Ready for continuous background execution on Windows/Linux with auto-restart on reboot.
