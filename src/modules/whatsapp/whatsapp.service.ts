@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Client, LocalAuth, Message, MessageMedia } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode-terminal';
+import * as fs from 'fs';
 import { AiService } from '../ai/ai.service';
 import { RagService } from '../rag/rag.service';
 import { StudyService } from '../rag/study.service';
@@ -150,15 +151,50 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     this.logger.log('📱 Initializing WhatsApp Web Client...');
 
-    const chromePath =
-      process.env.CHROME_BIN ||
-      process.env.PUPPETEER_EXECUTABLE_PATH ||
-      (process.platform === 'win32'
+    // Resilient Chrome executable detection across Windows & Linux
+    let chromePath: string | undefined = undefined;
+    const candidates = [
+      process.env.CHROME_BIN,
+      process.env.PUPPETEER_EXECUTABLE_PATH,
+      process.platform === 'win32'
         ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-        : undefined);
+        : undefined,
+      process.platform === 'win32'
+        ? 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+        : undefined,
+      process.platform === 'win32' && process.env.LOCALAPPDATA
+        ? `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`
+        : undefined,
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+    ].filter(Boolean) as string[];
+
+    for (const p of candidates) {
+      try {
+        if (fs.existsSync(p)) {
+          chromePath = p;
+          break;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (chromePath) {
+      this.logger.log(`🌐 Using Chrome executable at: ${chromePath}`);
+    } else {
+      this.logger.log('🌐 No explicit Chrome executable found on disk, letting Puppeteer resolve it');
+    }
 
     this.client = new Client({
       authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
+      webVersionCache: {
+        type: 'remote',
+        remotePath:
+          'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1030410331-alpha.html',
+      },
       puppeteer: {
         headless: true,
         ...(chromePath ? { executablePath: chromePath } : {}),
@@ -166,11 +202,10 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--single-process',
           '--disable-gpu',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--disable-site-isolation-trials',
+          '--disable-extensions',
         ],
       },
     });
