@@ -151,11 +151,18 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     this.logger.log('📱 Initializing WhatsApp Web Client...');
 
-    // Resilient Chrome executable detection across Windows & Linux
+    // Resilient Chrome/Edge executable detection across Windows & Linux
     let chromePath: string | undefined = undefined;
     const candidates = [
       process.env.CHROME_BIN,
       process.env.PUPPETEER_EXECUTABLE_PATH,
+      // Prefer Microsoft Edge on Windows to avoid conflicting with user's open Google Chrome
+      process.platform === 'win32'
+        ? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+        : undefined,
+      process.platform === 'win32'
+        ? 'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
+        : undefined,
       process.platform === 'win32'
         ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
         : undefined,
@@ -183,24 +190,16 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (chromePath) {
-      this.logger.log(`🌐 Using Chrome executable at: ${chromePath}`);
+      this.logger.log(`🌐 Using Browser executable at: ${chromePath}`);
     } else {
-      this.logger.log('🌐 No explicit Chrome executable found on disk, letting Puppeteer resolve it');
+      this.logger.log('🌐 No explicit Chrome/Edge executable found on disk, letting Puppeteer resolve it');
     }
 
     this.client = new Client({
       authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
-      qrMaxRetries: 10,
-      authTimeoutMs: 60000,
-      takeoverOnConflict: true,
-      takeoverTimeoutMs: 10000,
-      webVersionCache: {
-        type: 'remote',
-        remotePath:
-          'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1056179073-alpha.html',
-      },
       puppeteer: {
         headless: true,
+        bypassCSP: true,
         ...(chromePath ? { executablePath: chromePath } : {}),
         args: [
           '--no-sandbox',
@@ -212,35 +211,60 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
           '--disable-extensions',
           '--no-first-run',
           '--no-default-browser-check',
-          '--disable-background-networking',
-          '--disable-sync',
         ],
       },
     });
 
-    // 1. QR Code generated event
+    // 1. QR Code generated event (from whatsapp-web.js internal hooks)
     this.client.on('qr', (qr) => {
       this.latestQr = qr;
+      this.initError = null;
       this.isConnected = false;
       this.logger.log('📲 QR Code generated! Open /api/v1/whatsapp/qr or scan in console:');
       qrcode.generate(qr, { small: true });
     });
 
-    // 2. Ready event
+    // 2. DOM QR Code Scraper: directly extracts pairing token from WhatsApp Web DOM
+    const qrScraperInterval = setInterval(async () => {
+      if (this.isConnected) {
+        clearInterval(qrScraperInterval);
+        return;
+      }
+      try {
+        if (this.client?.pupPage) {
+          const qrData = await this.client.pupPage.evaluate(() => {
+            const el = document.querySelector('div[data-ref]');
+            return el ? el.getAttribute('data-ref') : null;
+          });
+          if (qrData && qrData !== this.latestQr) {
+            this.latestQr = qrData;
+            this.initError = null;
+            this.logger.log('📲 QR Code captured directly from WhatsApp Web DOM! Open /api/v1/whatsapp/qr');
+            qrcode.generate(qrData, { small: true });
+          }
+        }
+      } catch {
+        // Page navigation or context reloads are expected while loading
+      }
+    }, 1500);
+
+    // 3. Ready event
     this.client.on('ready', () => {
       this.isConnected = true;
       this.latestQr = null;
+      clearInterval(qrScraperInterval);
       this.logger.log('🚀 WhatsApp Bot is connected and ready!');
     });
 
-    // 3. Authenticated
+    // 4. Authenticated
     this.client.on('authenticated', () => {
       this.isConnected = true;
       this.latestQr = null;
+      clearInterval(qrScraperInterval);
       this.logger.log('✅ WhatsApp session authenticated successfully!');
     });
 
-    // 4. Auth failure
+    // 5. Auth failure
     this.client.on('auth_failure', (msg) => {
       this.isConnected = false;
       this.logger.error(`❌ WhatsApp auth failure: ${msg}`);
@@ -251,12 +275,12 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`⚠️ WhatsApp disconnected: ${reason}`);
     });
 
-    // 5. Incoming message handler from other people
+    // 6. Incoming message handler from other people
     this.client.on('message', async (msg) => {
       await this.handleMessage(msg);
     });
 
-    // 6. Support "Message yourself" (Self-chat on your own number)
+    // 7. Support "Message yourself" (Self-chat on your own number)
     this.client.on('message_create', async (msg) => {
       // Only trigger if sent by you TO your own number (self-chat), avoiding bot reply loops
       if (
@@ -275,9 +299,13 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       }
     });
 
-    // Initialize client
+    // Initialize client with resilient error handling
     this.client.initialize().catch((err: unknown) => {
       const errorMsg = err instanceof Error ? err.message : String(err);
+      if (this.latestQr || this.isConnected) {
+        this.logger.warn(`ℹ️ WhatsApp background notice: ${errorMsg}`);
+        return;
+      }
       this.initError = errorMsg;
       this.logger.error(`Failed to initialize WhatsApp client: ${errorMsg}`);
     });

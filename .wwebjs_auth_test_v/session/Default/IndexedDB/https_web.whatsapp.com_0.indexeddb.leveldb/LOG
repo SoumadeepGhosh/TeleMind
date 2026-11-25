@@ -1,0 +1,6 @@
+2026/11/25-15:31:44.343 1f44 Creating DB D:\TeleMind\.wwebjs_auth_test_v\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb since it was missing.
+2026/11/25-15:31:44.347 1f44 Reusing MANIFEST D:\TeleMind\.wwebjs_auth_test_v\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/11/25-15:31:44.366 4c3c Level-0 table #5: started
+2026/11/25-15:31:44.367 4c3c Level-0 table #5: 7158 bytes OK
+2026/11/25-15:31:44.368 4c3c Delete type=0 #3
+2026/11/25-15:31:44.369 2678 Manual compaction at level-0 from '\x00\x01\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x02\x00\x00\x00' @ 0 : 0; will stop at (end)

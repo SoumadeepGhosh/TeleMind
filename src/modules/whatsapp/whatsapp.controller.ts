@@ -2,12 +2,19 @@ import { Controller, Get, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { WhatsappService } from './whatsapp.service';
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const QRCode = require('qrcode');
+
 @Controller('whatsapp')
 export class WhatsappController {
   constructor(private readonly whatsapp: WhatsappService) {}
 
   @Get('qr')
-  getQrPage(@Res() res: Response): void {
+  async getQrPage(@Res() res: Response): Promise<void> {
+    // Pairing codes are short-lived credentials; never let browsers or proxies cache them.
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Referrer-Policy', 'no-referrer');
     if (this.whatsapp.isConnected) {
       res.type('html').send(`
         <!DOCTYPE html>
@@ -100,7 +107,13 @@ export class WhatsappController {
       return;
     }
 
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=360x360&margin=15&data=${encodeURIComponent(this.whatsapp.latestQr)}`;
+    // Render locally: external QR services may be blocked by hosting and would receive
+    // the WhatsApp pairing credential.
+    const qrDataUrl = await QRCode.toDataURL(this.whatsapp.latestQr, {
+      width: 360,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+    });
 
     res.type('html').send(`
       <!DOCTYPE html>
@@ -108,7 +121,7 @@ export class WhatsappController {
       <head>
         <meta charset="UTF-8">
         <title>Scan WhatsApp QR - Soumadeep AI</title>
-        <meta http-equiv="refresh" content="18">
+        <meta http-equiv="refresh" content="5">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
           body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; }
@@ -131,9 +144,9 @@ export class WhatsappController {
             3. Tap <b>Link a Device</b> and point camera here:
           </p>
           <div class="qr-container">
-            <img src="${qrUrl}" alt="WhatsApp QR Code" />
+            <img src="${qrDataUrl}" alt="WhatsApp QR Code" />
           </div>
-          <div class="footer">🔄 Auto-refreshes every 18 seconds</div>
+          <div class="footer">🔄 Auto-refreshes every 5 seconds</div>
         </div>
       </body>
       </html>
