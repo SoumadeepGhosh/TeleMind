@@ -190,10 +190,14 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
     this.client = new Client({
       authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
+      qrMaxRetries: 10,
+      authTimeoutMs: 60000,
+      takeoverOnConflict: true,
+      takeoverTimeoutMs: 10000,
       webVersionCache: {
         type: 'remote',
         remotePath:
-          'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1030410331-alpha.html',
+          'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1056179073-alpha.html',
       },
       puppeteer: {
         headless: true,
