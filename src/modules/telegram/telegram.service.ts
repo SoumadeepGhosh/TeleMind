@@ -48,14 +48,31 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     // 4. Verify connection with Telegram and launch polling
     try {
+      // Clear any conflicting webhooks or stuck updates on Telegram servers
+      try {
+        await this.bot.telegram.deleteWebhook({ drop_pending_updates: true });
+      } catch (webhookErr) {
+        this.logger.debug(`Could not clear webhook: ${webhookErr}`);
+      }
+
       const botInfo = await this.bot.telegram.getMe();
       this.logger.log(`🤖 Telegram Bot connected: @${botInfo.username} (${botInfo.first_name})`);
 
-      void this.bot.launch();
+      // Launch long-polling with dropPendingUpdates enabled
+      void this.bot.launch({ dropPendingUpdates: true });
       this.logger.log('📡 Bot is actively listening for messages in Telegram!');
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Failed to connect Telegram Bot: ${errorMsg}`);
+      this.logger.error(`❌ Failed to connect Telegram Bot: ${errorMsg}`);
+      if (errorMsg.includes('409') || errorMsg.includes('Conflict')) {
+        this.logger.error(
+          '💡 TIP: Telegram 409 Conflict means this bot is already running on another machine (e.g. your local laptop). Stop the local instance first!',
+        );
+      } else if (errorMsg.includes('404') || errorMsg.includes('Unauthorized')) {
+        this.logger.error(
+          '💡 TIP: Telegram 401/404 Unauthorized means TELEGRAM_BOT_TOKEN in .env is incorrect.',
+        );
+      }
     }
   }
 
