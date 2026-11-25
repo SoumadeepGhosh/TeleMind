@@ -210,6 +210,10 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
           '--disable-features=IsolateOrigins,site-per-process',
           '--disable-site-isolation-trials',
           '--disable-extensions',
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--disable-background-networking',
+          '--disable-sync',
         ],
       },
     });
