@@ -10,6 +10,7 @@ export interface DocumentJobData {
   bufferBase64: string;
   source: 'telegram' | 'whatsapp';
   senderId: string;
+  organizationId?: string;
 }
 
 @Processor(DOCUMENT_QUEUE_NAME)
@@ -21,13 +22,14 @@ export class DocumentProcessor extends WorkerHost {
   }
 
   async process(job: Job<DocumentJobData>): Promise<{ documentId: string; chunkCount: number }> {
-    const { fileName, mimeType, bufferBase64, senderId } = job.data;
+    const { fileName, mimeType, bufferBase64, senderId, organizationId } = job.data;
+    if (!organizationId) throw new Error('Refusing to index a channel document without a workspace owner.');
     this.logger.log(`⚙️ [BullMQ Worker] Processing job #${job.id}: "${fileName}" from ${senderId}`);
 
     const buffer = Buffer.from(bufferBase64, 'base64');
 
     // Heavy lifting: text extraction, chunking, and pgvector embeddings
-    const result = await this.rag.indexDocumentFromBuffer(fileName, mimeType, buffer);
+    const result = await this.rag.indexDocumentFromBuffer(fileName, mimeType, buffer, organizationId);
 
     this.logger.log(
       `✅ [BullMQ Worker] Finished job #${job.id}: Indexed ${result.chunkCount} chunks into PostgreSQL!`,

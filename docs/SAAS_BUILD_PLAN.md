@@ -354,9 +354,74 @@ model UsageRecord {
 
 ---
 
-## 7. Immediate Next Step
+## 7. Initial Implementation Target (historical)
 
-Proceed to **Phase 1: SaaS Foundation & Multi-Tenancy**:
+The first implementation target was **Phase 1: SaaS Foundation & Multi-Tenancy**:
 1. Update [prisma/schema.prisma](file:///d:/TeleMind/prisma/schema.prisma) with the new multi-tenant models (`Organization`, `User`, `Membership`, `Integration`, `BotSettings`, `Conversation`, `Message`, and `UsageRecord`).
 2. Run `pnpm prisma db push` to synchronize PostgreSQL.
 3. Build the core `AuthModule` (signup, login, and JWT `TenantGuard`).
+
+## V2 implementation status
+
+The first backend foundation is now in the repository:
+
+- `POST /api/v1/auth/register` creates a user, a workspace, and an owner membership.
+- `POST /api/v1/auth/login` returns a signed bearer token.
+- `GET /api/v1/auth/me` returns the authenticated user's workspace and role.
+- `GET /api/v1/knowledge/documents`, `POST /api/v1/knowledge/notes`, `POST /api/v1/knowledge/ask`, and `DELETE /api/v1/knowledge/documents/:id` are JWT-protected and scoped to the token's workspace.
+- New documents can be associated with a workspace; existing documents remain unassigned until deliberately migrated.
+
+The schema validates and the NestJS app compiles. On 2026-11-26, the migrations and auth/knowledge service flows were smoke-checked against a separate temporary local database, including cross-workspace listing, search, and deletion isolation. No migration was applied to the existing local database or the remote database configured in `.env`. Legacy Telegram and WhatsApp bot handlers still use shared/global document operations and must be isolated or disabled before serving multiple customer workspaces.
+
+The initial dashboard milestone has since been started. See the delivery status and remaining plan below for the current sequence.
+
+## Delivery status and remaining plan (reviewed 2026-11-26)
+
+Treat this section as the source of truth for delivery status. The roadmap above describes the target product; it does not mean those features are already available.
+
+### Delivered foundation
+
+- Database migration and Prisma models for organizations, memberships, and optional document workspace ownership.
+- Registration, login, profile, organization listing/creation/switching, and organization rename endpoints.
+- JWT-protected knowledge list, note indexing, ask, and delete endpoints scoped to the active workspace.
+- JWT-protected PDF and text-file upload and indexing for workspace knowledge (PDF, TXT, MD, CSV, JSON; 10 MB file limit and 100,000 extracted-character limit).
+- Per-workspace Telegram bot connections with encrypted token storage, workspace-scoped message handling, and a single-owner WhatsApp demo QR session.
+- API & Integrations dashboard with a live knowledge query tester and route reference.
+- Initial Next.js dashboard for login, knowledge notes, workspace selection, and model choice for dashboard queries.
+
+### In progress: close Phase 1 and make the dashboard reliable
+
+1. **Correctness and security:** prevent unscoped legacy bot access from being mistaken for tenant-safe service; verify upload, search, and delete isolation across workspaces; complete async indexing and authorization checks.
+2. **Knowledge workflow:** file upload is available for PDF, TXT, MD, CSV, and JSON with size/type/extracted-text validation and synchronous indexing. Background progress, persisted error states, and retry behavior remain to be implemented.
+3. **Dashboard truthfulness:** remove sample metrics and fake channel/member states. Display unavailable capabilities explicitly until backed by APIs.
+4. **Team access:** implement invitations, role changes, and member removal with owner/admin authorization before displaying a team-management workflow.
+5. **Settings:** persist workspace bot persona and operational settings in the database and apply them to responses; distinguish browser-only preferences from workspace configuration.
+
+**Phase 1 exit criteria:** schema migration applies cleanly; registration/login and workspace switching work; a user can only read, create, search, and delete documents in their active workspace; automated checks cover cross-tenant and role boundaries; dashboard shows only server-backed state.
+
+### Planned phases after Phase 1
+
+| Order | Phase | Scope | Exit criteria |
+|---|---|---|---|
+| 2 | Production WhatsApp integration | Replace the single-session WhatsApp Web demo with per-workspace Meta WhatsApp Cloud API onboarding, webhook verification/signature validation, idempotent inbound queue, tenant routing, and outbound replies. | Two workspaces can connect separate official WhatsApp channels without shared credentials or data. |
+| 3 | Conversations and handoff | Persist inbound/outbound messages, conversation status, assignment, business hours, human takeover, and audit events. | Human agents can safely take over, reply, resume AI, and resolve a conversation. |
+| 4 | Team dashboard | Live inbox, channel management, knowledge upload progress, persisted persona settings, and team administration. | UI actions map to protected APIs and report real server state. |
+| 5 | Billing and operations | Stripe subscription lifecycle, usage metering/limits, structured logs, tracing, metrics, deployment and backup guidance. | Subscription and usage state are reconciled from verified webhooks; service health is observable. |
+
+### Dependencies and release gates
+
+- **Before any multi-customer production deployment:** replace the one-workspace WhatsApp demo with official per-workspace Cloud API channels; rotate secrets that have ever been committed or exposed; use production-grade JWT and encryption key storage; configure HTTPS, webhook signature checks, rate limits, and database backups. Run Telegram polling in one backend process per configured bot.
+- **External setup needed for channel and billing phases:** Meta developer app and test business number, public HTTPS webhook URL, Telegram bot token(s), and Stripe test account/webhook secret. These are integration inputs, not code already present.
+- **Release sequence:** local migration and API checks → tenant-isolation review → channel provider sandbox → end-to-end workspace tests → production secrets and backup setup → limited rollout.
+
+### Current implementation caveats
+
+- Workspace membership endpoints exist, but membership invitations and role administration do not.
+- Notes and supported files can be indexed through the API and dashboard. Upload runs synchronously; there is no background progress, persisted failure state, or retry action yet. Scanned PDFs need OCR and are not supported.
+- AI model choice is a browser preference for the dashboard query only. Workspace persona, business hours, and temperature settings are not available yet.
+- Telegram bot tokens are encrypted using `DATA_ENCRYPTION_KEY` (or the JWT secret as a development fallback); keep the encryption key stable so stored tokens can be decrypted after restarts. Telegram uses long polling, so do not run multiple backend replicas polling the same bot.
+- WhatsApp is a single shared demo session claimed by one workspace at a time. It uses the WhatsApp Web QR flow and is not the production Meta WhatsApp Cloud API integration. Keep `.wwebjs_auth` on persistent storage, and do not deploy multiple WhatsApp scanner processes against it.
+- Apply the workspace integrations migration with `pnpm prisma migrate deploy` before starting the updated backend. Remove any old `TELEGRAM_BOT_TOKEN` from `.env` and enter each workspace's token in Dashboard > Telegram & WhatsApp.
+- For an existing Supabase database with no Prisma migration history (`P3005`), first verify its current tables match `20261117092847_superbase_migration`, then baseline that migration with `pnpm prisma migrate resolve --applied 20261117092847_superbase_migration` and run `pnpm prisma migrate deploy`. If later migrations were previously applied with `db push`, compare their full schema effects before marking them as applied; do not resolve the newest migration blindly.
+- There is no conversation inbox, persisted human handoff, billing, usage enforcement, or observability pipeline yet.
+- Do not claim production readiness until the Phase 1 exit criteria and pre-deployment gates above are satisfied.

@@ -1,6 +1,5 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Client, LocalAuth, Message, MessageMedia } from 'whatsapp-web.js';
-import * as qrcode from 'qrcode-terminal';
 import * as fs from 'fs';
 import { AiService } from '../ai/ai.service';
 import { RagService } from '../rag/rag.service';
@@ -20,6 +19,19 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   public latestQr: string | null = null;
   public isConnected = false;
   public initError: string | null = null;
+  private organizationId: string | null = null;
+
+  setWorkspace(organizationId: string | null): void {
+    this.organizationId = organizationId;
+  }
+
+  get connectedNumber(): string | null {
+    return this.client?.info?.wid?.user || null;
+  }
+
+  isWorkspace(organizationId: string): boolean {
+    return this.organizationId === organizationId;
+  }
 
   constructor(
     private readonly ai: AiService,
@@ -96,7 +108,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private async handleStudyAction(msg: Message, sender: string, topic: string): Promise<void> {
+  private async handleStudyAction(msg: Message, sender: string, topic: string, organizationId: string): Promise<void> {
     if (!topic) {
       return void (await this.replyAndPersist(
         msg,
@@ -116,7 +128,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     );
 
     try {
-      const result = await this.study.researchAndIndexTopic(topic);
+      const result = await this.study.researchAndIndexTopic(topic, organizationId);
       const pdfMedia = new MessageMedia(
         'application/pdf',
         result.pdfBuffer.toString('base64'),
@@ -148,7 +160,17 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
+    let demoClaim;
+    try {
+      demoClaim = await this.prisma.integration.findFirst({ where: { provider: 'WHATSAPP_DEMO' } });
+    } catch {
+      this.initError = 'Workspace integration migration is not applied. Run prisma migrate deploy and restart the backend.';
+      this.logger.error(this.initError);
+      return;
+    }
+    this.organizationId = demoClaim?.organizationId || null;
+    this.logger.log('Initializing shared WhatsApp demo client...');
     this.logger.log('📱 Initializing WhatsApp Web Client...');
 
     // Resilient Chrome/Edge executable detection across Windows & Linux
@@ -195,8 +217,27 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('🌐 No explicit Chrome/Edge executable found on disk, letting Puppeteer resolve it');
     }
 
+    // Windows holds file locks on active Chromium files (e.g. CrashpadMetrics-active.pma)
+    // while Puppeteer is open, causing LocalAuth.logout() to throw EBUSY and crash Node.
+    const authStrategy = new LocalAuth({ dataPath: './.wwebjs_auth' });
+    const originalLogout = authStrategy.logout.bind(authStrategy);
+    authStrategy.logout = async () => {
+      try {
+        await originalLogout();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('EBUSY') || msg.includes('EPERM') || msg.includes('ENOTEMPTY')) {
+          this.logger.warn(
+            `Ignored locked Windows browser session file during WhatsApp logout: ${msg}`,
+          );
+          return;
+        }
+        throw err;
+      }
+    };
+
     this.client = new Client({
-      authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
+      authStrategy,
       puppeteer: {
         headless: true,
         bypassCSP: true,
@@ -206,6 +247,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-gpu',
+          '--disable-crash-reporter',
           '--disable-features=IsolateOrigins,site-per-process',
           '--disable-site-isolation-trials',
           '--disable-extensions',
@@ -220,8 +262,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       this.latestQr = qr;
       this.initError = null;
       this.isConnected = false;
-      this.logger.log('📲 QR Code generated! Open /api/v1/whatsapp/qr or scan in console:');
-      qrcode.generate(qr, { small: true });
+      this.logger.log('WhatsApp QR code updated for workspace scanning.');
     });
 
     // 2. DOM QR Code Scraper: directly extracts pairing token from WhatsApp Web DOM
@@ -239,8 +280,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
           if (qrData && qrData !== this.latestQr) {
             this.latestQr = qrData;
             this.initError = null;
-            this.logger.log('📲 QR Code captured directly from WhatsApp Web DOM! Open /api/v1/whatsapp/qr');
-            qrcode.generate(qrData, { small: true });
+      this.logger.log('WhatsApp QR code updated for workspace scanning.');
           }
         }
       } catch {
@@ -251,6 +291,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     // 3. Ready event
     this.client.on('ready', () => {
       this.isConnected = true;
+      this.initError = null;
       this.latestQr = null;
       clearInterval(qrScraperInterval);
       this.logger.log('🚀 WhatsApp Bot is connected and ready!');
@@ -259,6 +300,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     // 4. Authenticated
     this.client.on('authenticated', () => {
       this.isConnected = true;
+      this.initError = null;
       this.latestQr = null;
       clearInterval(qrScraperInterval);
       this.logger.log('✅ WhatsApp session authenticated successfully!');
@@ -272,6 +314,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
     this.client.on('disconnected', (reason) => {
       this.isConnected = false;
+      this.latestQr = null;
       this.logger.warn(`⚠️ WhatsApp disconnected: ${reason}`);
     });
 
@@ -312,12 +355,16 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleMessage(msg: Message): Promise<void> {
+    const organizationId = this.organizationId;
+    if (!organizationId) return;
+
     // 1. Ignore status broadcasts and empty messages
     if (msg.from === 'status@broadcast' || (!msg.body && !msg.hasMedia)) {
       return;
     }
 
     const sender = msg.from; // unique sender ID (e.g. 919876543210@c.us)
+    const conversationId = `${organizationId}:${sender}`;
     const text = msg.body?.trim() || '';
 
     // ⛔ RULE: 100% BAN ALL GROUPS (Never process or reply to any group under any circumstance!)
@@ -397,12 +444,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
             ));
           }
 
-          // Generate answer with Soumadeep AI (Groq 120B)
-          const unknownContext = isUnknownNumber
-            ? "NOTE: The sender is an unknown/unsaved contact messaging Soumadeep on WhatsApp. Be polite, helpful, and professional. Let them know you are Soumadeep's AI assistant."
-            : undefined;
-
-          let answer = await this.ai.generateAnswer(transcription, unknownContext, sender);
+          const voiceAnswer = await this.rag.answerWithKnowledge(transcription, conversationId, organizationId);
+          let answer = voiceAnswer.answer;
 
           if (isFirstMessageFromUnknown) {
             answer = `👋 *Hello! I am Soumadeep's AI Assistant (Soumadeep AI).*\nSoumadeep may be busy or away right now, but I can help answer your questions or take a message for him.\n\n${answer}`;
@@ -440,6 +483,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
             mimeType: media.mimetype,
             bufferBase64: media.data,
             source: 'whatsapp',
+            organizationId,
             senderId: sender,
           });
 
@@ -478,7 +522,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         if (pending.action === 'WAITING_NOTE') {
           const { title, content } = this.parseNote(text);
           try {
-            const result = await this.rag.indexTextDocument(title, content);
+            const result = await this.rag.indexTextDocument(title, content, 'text/plain', undefined, organizationId);
             return void (await this.replyAndPersist(
               msg,
               sender,
@@ -499,11 +543,11 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         }
 
         if (pending.action === 'WAITING_TOPIC') {
-          return void (await this.handleStudyAction(msg, sender, text));
+          return void (await this.handleStudyAction(msg, sender, text, organizationId));
         }
 
         if (pending.action === 'WAITING_SEARCH') {
-          const { answer, sources } = await this.rag.answerWithKnowledge(text, sender);
+          const { answer, sources } = await this.rag.answerWithKnowledge(text, conversationId, organizationId);
           let replyText = answer;
           if (sources.length > 0) {
             replyText += `\n\n📚 *Sources Cited:*\n${sources.map((s) => `• ${s}`).join('\n')}`;
@@ -560,7 +604,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (text === '4' || text === '4️⃣' || text.toLowerCase() === 'documents') {
-        const docs = await this.rag.listDocuments();
+        const docs = await this.rag.listDocuments(organizationId);
         if (docs.length === 0) {
           return void (await this.replyAndPersist(
             msg,
@@ -581,7 +625,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (text === '5' || text === '5️⃣' || text.toLowerCase() === 'clear memory') {
-        this.ai.clearHistory(sender);
+        this.ai.clearHistory(conversationId);
         this.userStates.delete(sender);
         return void (await this.replyAndPersist(
           msg,
@@ -606,7 +650,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         const rawNote = saveNoteMatch[1].trim();
         const { title, content } = this.parseNote(rawNote);
         try {
-          const result = await this.rag.indexTextDocument(title, content);
+          const result = await this.rag.indexTextDocument(title, content, 'text/plain', undefined, organizationId);
           return void (await this.replyAndPersist(
             msg,
             sender,
@@ -635,7 +679,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       if (deleteMatch && deleteMatch[1]) {
         const target = deleteMatch[1].trim();
         try {
-          const result = await this.rag.deleteDocument(target);
+          const result = await this.rag.deleteDocument(target, organizationId);
           if (result.deleted) {
             return void (await this.replyAndPersist(
               msg,
@@ -665,7 +709,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         ) ||
         /^(?:my\s+notes|my\s+documents|list\s+docs|all\s+notes|documents)$/i.test(text)
       ) {
-        const docs = await this.rag.listDocuments();
+        const docs = await this.rag.listDocuments(organizationId);
         if (docs.length === 0) {
           return void (await this.replyAndPersist(
             msg,
@@ -694,7 +738,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         text.match(/^(?:teach\s+me\s+about|deep\s+dive\s+into)\s+(.+)$/is);
 
       if (studyMatch && studyMatch[1]) {
-        return void (await this.handleStudyAction(msg, sender, studyMatch[1].trim()));
+        return void (await this.handleStudyAction(msg, sender, studyMatch[1].trim(), organizationId));
       }
 
       // E. Clear Chat Intent
@@ -704,7 +748,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         ) ||
         /^(?:clear\s+memory|reset\s+chat|forget\s+everything)$/i.test(text)
       ) {
-        this.ai.clearHistory(sender);
+        this.ai.clearHistory(conversationId);
         this.userStates.delete(sender);
         return void (await this.replyAndPersist(
           msg,
@@ -721,7 +765,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       if (recallMatch && recallMatch[1]) {
         const { answer, sources } = await this.rag.answerWithKnowledge(
           recallMatch[1].trim(),
-          sender,
+          conversationId,
+          organizationId,
         );
         let replyText = answer;
         if (sources.length > 0) {
@@ -743,7 +788,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         const { title, content } = this.parseNote(fullText);
 
         try {
-          const result = await this.rag.indexTextDocument(title, content);
+          const result = await this.rag.indexTextDocument(title, content, 'text/plain', undefined, organizationId);
           return void (await this.replyAndPersist(
             msg,
             sender,
@@ -775,7 +820,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         }
 
         try {
-          const result = await this.rag.deleteDocument(target);
+          const result = await this.rag.deleteDocument(target, organizationId);
           if (!result.deleted) {
             return void (await this.replyAndPersist(
               msg,
@@ -801,7 +846,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
       // Clear
       if (text.toLowerCase() === '!clear' || text.toLowerCase() === '/clear') {
-        this.ai.clearHistory(sender);
+        this.ai.clearHistory(conversationId);
         this.userStates.delete(sender);
         return void (await this.replyAndPersist(
           msg,
@@ -812,7 +857,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
       // Listdocs
       if (text.toLowerCase() === '!listdocs' || text.toLowerCase() === '/listdocs') {
-        const docs = await this.rag.listDocuments();
+        const docs = await this.rag.listDocuments(organizationId);
         if (docs.length === 0) {
           return void (await this.replyAndPersist(
             msg,
@@ -833,7 +878,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       // Study
       if (text.toLowerCase().startsWith('!study ') || text.toLowerCase().startsWith('/study ')) {
         const topic = text.replace(/^(!study|\/study)\s*/i, '').trim();
-        return void (await this.handleStudyAction(msg, sender, topic));
+        return void (await this.handleStudyAction(msg, sender, topic, organizationId));
       }
 
       // Ask
@@ -847,7 +892,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
           ));
         }
 
-        const { answer, sources } = await this.rag.answerWithKnowledge(query, sender);
+        const { answer, sources } = await this.rag.answerWithKnowledge(query, conversationId, organizationId);
         let replyText = answer;
         if (sources.length > 0) {
           replyText += `\n\n📚 *Sources Cited:*\n${sources.map((s) => `• ${s}`).join('\n')}`;
@@ -858,11 +903,11 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       // --- GENERAL AI CHAT (Groq 120B) ---
       const promptToUse = cleanPrompt || text;
 
-      const unknownContext = isUnknownNumber
-        ? "NOTE: The sender is an unknown/unsaved contact messaging Soumadeep on WhatsApp. Be polite, helpful, and professional. Let them know you are Soumadeep's AI assistant and can answer questions or take a message for him."
-        : undefined;
-
-      let answer = await this.ai.generateAnswer(promptToUse, unknownContext, sender);
+      const knowledgeResult = await this.rag.answerWithKnowledge(promptToUse, conversationId, organizationId);
+      let answer = knowledgeResult.answer;
+      if (knowledgeResult.sources.length > 0) {
+        answer += `\n\nSources: ${knowledgeResult.sources.join(', ')}`;
+      }
 
       // If it's the very first message from this unknown number, prepend an introduction banner with interactive menu
       if (isFirstMessageFromUnknown) {

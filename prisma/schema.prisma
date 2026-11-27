@@ -35,195 +35,269 @@ enum MessageRole {
   SYSTEM
 }
 
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  AGENT
+}
+
+enum IntegrationProvider {
+  TELEGRAM
+  WHATSAPP_DEMO
+}
+
+enum IntegrationStatus {
+  PENDING
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+model Organization {
+  id            String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name          String         @db.VarChar(255)
+  slug          String         @unique @db.VarChar(255)
+  createdAt     DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime       @updatedAt @db.Timestamptz(6)
+  members       Membership[]
+  documents     Document[]
+  integrations  Integration[]
+  telegramChats TelegramChat[]
+
+  @@map("organizations")
+}
+
+model Membership {
+  id             String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId         String        @db.Uuid
+  organizationId String        @db.Uuid
+  role           WorkspaceRole @default(AGENT)
+  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(6)
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+  @@map("memberships")
+}
+
+model Integration {
+  id                   String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId       String              @db.Uuid
+  provider             IntegrationProvider
+  demoSlot             Int?               @unique
+  status               IntegrationStatus   @default(DISCONNECTED)
+  credentialsEncrypted String?             @db.Text
+  externalName         String?             @db.VarChar(255)
+  lastError            String?             @db.Text
+  connectedAt          DateTime?           @db.Timestamptz(6)
+  createdAt            DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt            DateTime            @updatedAt @db.Timestamptz(6)
+  organization         Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider])
+  @@unique([provider, externalName])
+  @@index([provider, status])
+  @@map("integrations")
+}
+
 model User {
-  id           String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  email        String        @unique @db.VarChar(255)
-  passwordHash String        @db.VarChar(255)
-  fullName     String?       @db.VarChar(255)
-  role         UserRole      @default(MEMBER)
-  isActive     Boolean       @default(true)
-  createdAt    DateTime      @default(now()) @db.Timestamptz(6)
-  updatedAt    DateTime      @updatedAt @db.Timestamptz(6)
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @db.VarChar(255)
+  fullName     String?  @db.VarChar(255)
+  role         UserRole @default(MEMBER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
 
   telegramUsers TelegramUser[]
   documents     Document[]
   auditLogs     AuditLog[]
+  memberships   Membership[]
 
   @@map("users")
 }
 
 model TelegramUser {
-  id              String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  telegramId      BigInt       @unique
-  username        String?      @db.VarChar(255)
-  firstName       String?      @db.VarChar(255)
-  lastName        String?      @db.VarChar(255)
-  isBlocked       Boolean      @default(false)
-  userId          String?      @db.Uuid
-  user            User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
-  createdAt       DateTime     @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime     @updatedAt @db.Timestamptz(6)
+  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  telegramId BigInt   @unique
+  username   String?  @db.VarChar(255)
+  firstName  String?  @db.VarChar(255)
+  lastName   String?  @db.VarChar(255)
+  isBlocked  Boolean  @default(false)
+  userId     String?  @db.Uuid
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(6)
 
-  chats           TelegramChatMember[]
-  messages        TelegramMessage[]
+  chats    TelegramChatMember[]
+  messages TelegramMessage[]
 
   @@index([telegramId])
   @@map("telegram_users")
 }
 
 model TelegramChat {
-  id           String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  chatId       BigInt       @unique
-  type         String       @db.VarChar(50) // private, group, supergroup, channel
-  title        String?      @db.VarChar(255)
-  createdAt    DateTime     @default(now()) @db.Timestamptz(6)
-  updatedAt    DateTime     @updatedAt @db.Timestamptz(6)
+  id             String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId String?  @db.Uuid
+  chatId         BigInt
+  type           String   @db.VarChar(50) // private, group, supergroup, channel
+  title          String?  @db.VarChar(255)
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(6)
 
   members      TelegramChatMember[]
   messages     TelegramMessage[]
+  organization Organization?        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  @@unique([organizationId, chatId])
   @@index([chatId])
   @@map("telegram_chats")
 }
 
 model TelegramChatMember {
-  id             String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  telegramUserId String        @db.Uuid
-  telegramChatId String        @db.Uuid
-  joinedAt       DateTime      @default(now()) @db.Timestamptz(6)
+  id             String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  telegramUserId String   @db.Uuid
+  telegramChatId String   @db.Uuid
+  joinedAt       DateTime @default(now()) @db.Timestamptz(6)
 
-  telegramUser   TelegramUser  @relation(fields: [telegramUserId], references: [id], onDelete: Cascade)
-  telegramChat   TelegramChat  @relation(fields: [telegramChatId], references: [id], onDelete: Cascade)
+  telegramUser TelegramUser @relation(fields: [telegramUserId], references: [id], onDelete: Cascade)
+  telegramChat TelegramChat @relation(fields: [telegramChatId], references: [id], onDelete: Cascade)
 
   @@unique([telegramUserId, telegramChatId])
   @@map("telegram_chat_members")
 }
 
 model TelegramMessage {
-  id              String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  telegramUserId  String?        @db.Uuid
-  telegramChatId  String         @db.Uuid
-  messageId       BigInt
-  role            MessageRole    @default(USER)
-  text            String         @db.Text
-  tokenCount      Int?           @default(0)
-  createdAt       DateTime       @default(now()) @db.Timestamptz(6)
+  id             String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  telegramUserId String?     @db.Uuid
+  telegramChatId String      @db.Uuid
+  messageId      BigInt
+  role           MessageRole @default(USER)
+  text           String      @db.Text
+  tokenCount     Int?        @default(0)
+  createdAt      DateTime    @default(now()) @db.Timestamptz(6)
 
-  telegramUser    TelegramUser?  @relation(fields: [telegramUserId], references: [id], onDelete: SetNull)
-  telegramChat    TelegramChat   @relation(fields: [telegramChatId], references: [id], onDelete: Cascade)
+  telegramUser TelegramUser? @relation(fields: [telegramUserId], references: [id], onDelete: SetNull)
+  telegramChat TelegramChat  @relation(fields: [telegramChatId], references: [id], onDelete: Cascade)
 
   @@index([telegramChatId, createdAt(sort: Desc)])
   @@map("telegram_messages")
 }
 
 model WhatsappUser {
-  id          String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  jid         String            @unique @db.VarChar(100)
-  phoneNumber String?           @db.VarChar(50)
-  name        String?           @db.VarChar(255)
-  createdAt   DateTime          @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime          @updatedAt @db.Timestamptz(6)
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  jid         String   @unique @db.VarChar(100)
+  phoneNumber String?  @db.VarChar(50)
+  name        String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
 
-  messages    WhatsappMessage[]
+  messages WhatsappMessage[]
 
   @@index([jid])
   @@map("whatsapp_users")
 }
 
 model WhatsappChat {
-  id          String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  chatJid     String            @unique @db.VarChar(100)
-  name        String?           @db.VarChar(255)
-  isGroup     Boolean           @default(false)
-  createdAt   DateTime          @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime          @updatedAt @db.Timestamptz(6)
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  chatJid   String   @unique @db.VarChar(100)
+  name      String?  @db.VarChar(255)
+  isGroup   Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
-  messages    WhatsappMessage[]
+  messages WhatsappMessage[]
 
   @@index([chatJid])
   @@map("whatsapp_chats")
 }
 
 model WhatsappMessage {
-  id             String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  whatsappChatId String        @db.Uuid
-  whatsappUserId String?       @db.Uuid
-  messageId      String        @db.VarChar(255)
-  role           MessageRole   @default(USER)
-  text           String        @db.Text
-  mediaType      String?       @db.VarChar(50)
-  createdAt      DateTime      @default(now()) @db.Timestamptz(6)
+  id             String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  whatsappChatId String      @db.Uuid
+  whatsappUserId String?     @db.Uuid
+  messageId      String      @db.VarChar(255)
+  role           MessageRole @default(USER)
+  text           String      @db.Text
+  mediaType      String?     @db.VarChar(50)
+  createdAt      DateTime    @default(now()) @db.Timestamptz(6)
 
-  whatsappChat   WhatsappChat  @relation(fields: [whatsappChatId], references: [id], onDelete: Cascade)
-  whatsappUser   WhatsappUser? @relation(fields: [whatsappUserId], references: [id], onDelete: SetNull)
+  whatsappChat WhatsappChat  @relation(fields: [whatsappChatId], references: [id], onDelete: Cascade)
+  whatsappUser WhatsappUser? @relation(fields: [whatsappUserId], references: [id], onDelete: SetNull)
 
   @@index([whatsappChatId, createdAt(sort: Desc)])
   @@map("whatsapp_messages")
 }
 
 model KnowledgeBase {
-  id          String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  name        String       @db.VarChar(255)
-  slug        String       @unique @db.VarChar(255)
-  description String?      @db.Text
-  createdAt   DateTime     @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime     @updatedAt @db.Timestamptz(6)
+  id          String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name        String   @db.VarChar(255)
+  slug        String   @unique @db.VarChar(255)
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
 
-  documents   Document[]
+  documents Document[]
 
   @@map("knowledge_bases")
 }
 
 model Document {
-  id               String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  knowledgeBaseId  String?         @db.Uuid
-  uploadedById     String?         @db.Uuid
-  title            String          @db.VarChar(255)
-  fileKey          String          @db.VarChar(512)
-  fileSize         Int
-  mimeType         String          @db.VarChar(100)
-  status           DocumentStatus  @default(PENDING)
-  errorMessage     String?         @db.Text
-  totalChunks      Int             @default(0)
-  createdAt        DateTime        @default(now()) @db.Timestamptz(6)
-  updatedAt        DateTime        @updatedAt @db.Timestamptz(6)
+  id              String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  organizationId  String?        @db.Uuid
+  knowledgeBaseId String?        @db.Uuid
+  uploadedById    String?        @db.Uuid
+  title           String         @db.VarChar(255)
+  fileKey         String         @db.VarChar(512)
+  fileSize        Int
+  mimeType        String         @db.VarChar(100)
+  status          DocumentStatus @default(PENDING)
+  errorMessage    String?        @db.Text
+  totalChunks     Int            @default(0)
+  createdAt       DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @db.Timestamptz(6)
 
-  knowledgeBase    KnowledgeBase?  @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
-  uploadedBy       User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
-  chunks           DocumentChunk[]
+  knowledgeBase KnowledgeBase?  @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
+  organization  Organization?   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploadedBy    User?           @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  chunks        DocumentChunk[]
 
   @@index([knowledgeBaseId])
+  @@index([organizationId, createdAt(sort: Desc)])
   @@index([status])
   @@map("documents")
 }
 
 model DocumentChunk {
-  id          String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  documentId  String                 @db.Uuid
-  chunkIndex  Int
-  content     String                 @db.Text
-  metadata    Json                   @default("{}")
+  id         String                      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  documentId String                      @db.Uuid
+  chunkIndex Int
+  content    String                      @db.Text
+  metadata   Json                        @default("{}")
   // 768 dimensions for Gemini text-embedding-004
-  embedding   Unsupported("vector(768)")?
-  createdAt   DateTime               @default(now()) @db.Timestamptz(6)
+  embedding  Unsupported("vector(768)")?
+  createdAt  DateTime                    @default(now()) @db.Timestamptz(6)
 
-  document    Document               @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@index([documentId])
   @@map("document_chunks")
 }
 
 model AuditLog {
-  id          String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  userId      String?      @db.Uuid
-  action      String       @db.VarChar(100)
-  resource    String       @db.VarChar(100)
-  details     Json         @default("{}")
-  ipAddress   String?      @db.VarChar(45)
-  userAgent   String?      @db.Text
-  createdAt   DateTime     @default(now()) @db.Timestamptz(6)
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId    String?  @db.Uuid
+  action    String   @db.VarChar(100)
+  resource  String   @db.VarChar(100)
+  details   Json     @default("{}")
+  ipAddress String?  @db.VarChar(45)
+  userAgent String?  @db.Text
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
 
-  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([action])

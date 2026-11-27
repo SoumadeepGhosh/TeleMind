@@ -43,7 +43,12 @@ export class AiService {
    * Generates natural language answer using Groq (Llama 3.3 70B - 14,400 free reqs/day)
    * with automatic fallback to Gemini.
    */
-  async generateAnswer(prompt: string, context?: string, chatId?: string): Promise<string> {
+  async generateAnswer(
+    prompt: string,
+    context?: string,
+    chatId?: string,
+    preferredModel?: 'groq' | 'gemini',
+  ): Promise<string> {
     const currentDate = new Date().toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
@@ -55,64 +60,8 @@ export class AiService {
       ? `You are Soumadeep AI, an intelligent, helpful, and friendly personal AI knowledge and voice assistant.\nCurrent Date: ${currentDate}.\nHere is private context from the user's documents:\n"""\n${context}\n"""\nAnswer accurately based on this context. If the context does not contain the answer, say so politely.`
       : `You are Soumadeep AI, an intelligent, helpful, and friendly personal AI knowledge and voice assistant.\nCurrent Date: ${currentDate}.`;
 
-    // 1. Prioritize Groq (High Speed Llama 3.3 70B - 14,400 free requests per day)
-    if (this.config.groqApiKey) {
-      try {
-        const history = (chatId ? this.chatHistories.get(chatId) : []) || [];
-
-        const messages: Array<{ role: string; content: string }> = [
-          { role: 'system', content: systemPrompt },
-          ...history.map((h) => ({
-            role: h.role === 'model' ? 'assistant' : 'user',
-            content: h.parts[0]?.text || '',
-          })),
-          { role: 'user', content: prompt },
-        ];
-
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.config.groqApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: this.config.groqModel,
-            messages,
-            temperature: 0.7,
-            max_tokens: 1024,
-          }),
-        });
-
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`Groq API returned ${res.status}: ${errText}`);
-        }
-
-        const data = (await res.json()) as { choices: Array<{ message: { content: string } }> };
-        const responseText = data.choices[0]?.message?.content?.trim() || 'No response generated.';
-
-        // Save conversation history
-        if (chatId) {
-          history.push(
-            { role: 'user', parts: [{ text: prompt }] },
-            { role: 'model', parts: [{ text: responseText }] },
-          );
-          this.chatHistories.set(chatId, history.slice(-10));
-        }
-
-        return responseText;
-      } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        this.logger.error(`Groq error, attempting Gemini fallback: ${errorMsg}`);
-      }
-    }
-
-    // 2. Gemini Fallback
-    if (!this.genAI) {
-      return '⚠️ Neither Groq nor Gemini API key is configured on the server.';
-    }
-
-    try {
+    const runGemini = async (): Promise<string> => {
+      if (!this.genAI) throw new Error('Gemini API is not configured.');
       const model = this.genAI.getGenerativeModel({ model: this.config.geminiModel });
       const fullPrompt = context ? `${systemPrompt}\n\nUser Question: ${prompt}` : prompt;
 
@@ -132,10 +81,77 @@ export class AiService {
 
       const result = await model.generateContent(fullPrompt);
       return result.response.text().trim();
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Error generating answer from Gemini: ${errorMsg}`);
-      return `❌ Sorry, I encountered an issue generating a response: ${errorMsg}`;
+    };
+
+    const runGroq = async (): Promise<string> => {
+      if (!this.config.groqApiKey) throw new Error('Groq API is not configured.');
+      const history = (chatId ? this.chatHistories.get(chatId) : []) || [];
+      const messages: Array<{ role: string; content: string }> = [
+        { role: 'system', content: systemPrompt },
+        ...history.map((h) => ({
+          role: h.role === 'model' ? 'assistant' : 'user',
+          content: h.parts[0]?.text || '',
+        })),
+        { role: 'user', content: prompt },
+      ];
+
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.config.groqApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.config.groqModel,
+          messages,
+          temperature: 0.7,
+          max_tokens: 1024,
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Groq API returned ${res.status}: ${errText}`);
+      }
+
+      const data = (await res.json()) as { choices: Array<{ message: { content: string } }> };
+      const responseText = data.choices[0]?.message?.content?.trim() || 'No response generated.';
+
+      if (chatId) {
+        history.push(
+          { role: 'user', parts: [{ text: prompt }] },
+          { role: 'model', parts: [{ text: responseText }] },
+        );
+        this.chatHistories.set(chatId, history.slice(-10));
+      }
+
+      return responseText;
+    };
+
+    // If Gemini explicitly preferred
+    if (preferredModel === 'gemini') {
+      try {
+        return await runGemini();
+      } catch (geminiErr: any) {
+        this.logger.warn(`Gemini preferred execution failed: ${geminiErr.message}. Falling back to Groq.`);
+        try {
+          return await runGroq();
+        } catch (groqErr: any) {
+          return `❌ AI inference error: ${geminiErr.message}; Fallback error: ${groqErr.message}`;
+        }
+      }
+    }
+
+    // Default / Groq preferred
+    try {
+      return await runGroq();
+    } catch (groqErr: any) {
+      this.logger.warn(`Groq execution failed: ${groqErr.message}. Falling back to Gemini.`);
+      try {
+        return await runGemini();
+      } catch (geminiErr: any) {
+        return `❌ AI inference error: ${groqErr.message}; Fallback error: ${geminiErr.message}`;
+      }
     }
   }
 

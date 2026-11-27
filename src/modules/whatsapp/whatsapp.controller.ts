@@ -1,16 +1,22 @@
-import { Controller, Get, Res } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Req, Res, UseGuards } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
 import { Response } from 'express';
 import { WhatsappService } from './whatsapp.service';
+import { AuthenticatedUser } from '../auth/auth.types';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const QRCode = require('qrcode');
 
 @Controller('whatsapp')
+@UseGuards(AuthGuard('jwt'))
 export class WhatsappController {
   constructor(private readonly whatsapp: WhatsappService) {}
 
   @Get('qr')
-  async getQrPage(@Res() res: Response): Promise<void> {
+  async getQrPage(@Req() req: { user: AuthenticatedUser }, @Res() res: Response): Promise<void> {
+    if (!this.whatsapp.isWorkspace(req.user.organizationId)) {
+      throw new NotFoundException('The shared WhatsApp demo is not claimed by this workspace.');
+    }
     // Pairing codes are short-lived credentials; never let browsers or proxies cache them.
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     res.setHeader('Pragma', 'no-cache');

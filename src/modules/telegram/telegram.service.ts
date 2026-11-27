@@ -1,6 +1,5 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Telegraf, Markup } from 'telegraf';
-import { ConfigService } from '../../config/config.service';
 import { AiService } from '../ai/ai.service';
 import { RagService } from '../rag/rag.service';
 import { StudyService } from '../rag/study.service';
@@ -8,17 +7,17 @@ import { PrismaService } from '../database/prisma.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { DOCUMENT_QUEUE_NAME } from '../queue/queue.module';
+import { decryptCredential } from '../integrations/credential-vault';
 
 type PendingAction = 'WAITING_NOTE' | 'WAITING_TOPIC' | 'WAITING_SEARCH';
 
 @Injectable()
 export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramService.name);
-  private bot!: Telegraf;
+  private readonly bots = new Map<string, Telegraf>();
   private readonly userStates = new Map<string, { action: PendingAction; timestamp: number }>();
 
   constructor(
-    private readonly config: ConfigService,
     private readonly ai: AiService,
     private readonly rag: RagService,
     private readonly study: StudyService,
@@ -27,53 +26,72 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit(): Promise<void> {
-    const token = this.config.telegramToken;
-
-    if (!token) {
-      this.logger.warn('⚠️ TELEGRAM_BOT_TOKEN is not set in .env. Bot will not start.');
+    let integrations;
+    try {
+      integrations = await this.prisma.integration.findMany({
+        where: { provider: 'TELEGRAM', credentialsEncrypted: { not: null } },
+      });
+    } catch {
+      this.logger.error('Workspace integration migration is not applied. Run prisma migrate deploy before starting Telegram connections.');
       return;
     }
-
-    // 1. Initialize Telegraf bot instance
-    this.bot = new Telegraf(token);
-
-    // 2. Register global error handler
-    this.bot.catch((err, ctx) => {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`⚠️ Telegram Bot error for update ${ctx?.update?.update_id}: ${errorMsg}`);
-    });
-
-    // 3. Register command & message handlers
-    this.registerHandlers();
-
-    // 4. Verify connection with Telegram and launch polling
-    try {
-      // Clear any conflicting webhooks or stuck updates on Telegram servers
+    for (const integration of integrations) {
       try {
-        await this.bot.telegram.deleteWebhook({ drop_pending_updates: true });
-      } catch (webhookErr) {
-        this.logger.debug(`Could not clear webhook: ${webhookErr}`);
-      }
-
-      const botInfo = await this.bot.telegram.getMe();
-      this.logger.log(`🤖 Telegram Bot connected: @${botInfo.username} (${botInfo.first_name})`);
-
-      // Launch long-polling with dropPendingUpdates enabled
-      void this.bot.launch({ dropPendingUpdates: true });
-      this.logger.log('📡 Bot is actively listening for messages in Telegram!');
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`❌ Failed to connect Telegram Bot: ${errorMsg}`);
-      if (errorMsg.includes('409') || errorMsg.includes('Conflict')) {
-        this.logger.error(
-          '💡 TIP: Telegram 409 Conflict means this bot is already running on another machine (e.g. your local laptop). Stop the local instance first!',
-        );
-      } else if (errorMsg.includes('404') || errorMsg.includes('Unauthorized')) {
-        this.logger.error(
-          '💡 TIP: Telegram 401/404 Unauthorized means TELEGRAM_BOT_TOKEN in .env is incorrect.',
-        );
+        await this.connectWorkspace(integration.organizationId, decryptCredential(integration.credentialsEncrypted!));
+        await this.prisma.integration.update({ where: { id: integration.id }, data: { status: 'CONNECTED', lastError: null } });
+      } catch {
+        this.logger.error(`Could not restore Telegram for workspace ${integration.organizationId}.`);
+        await this.prisma.integration.update({
+          where: { id: integration.id },
+          data: { status: 'ERROR', lastError: 'Could not reconnect this bot. Check its token in workspace settings.' },
+        });
       }
     }
+  }
+
+  async validateToken(token: string): Promise<string> {
+    const bot = new Telegraf(token.trim());
+    const info = await bot.telegram.getMe();
+    return info.username || info.first_name;
+  }
+
+  async connectWorkspace(organizationId: string, token: string): Promise<string> {
+    await this.disconnectWorkspace(organizationId);
+    const bot = new Telegraf(token.trim());
+    bot.catch((error, ctx) => {
+      const message = (error instanceof Error ? error.message : String(error)).replace(token, '[redacted]');
+      this.logger.error(`Telegram error in workspace ${organizationId} update ${ctx?.update?.update_id}: ${message}`);
+    });
+    this.registerHandlers(bot, organizationId);
+    await bot.telegram.deleteWebhook({ drop_pending_updates: true }).catch(() => undefined);
+    const info = await bot.telegram.getMe();
+    this.bots.set(organizationId, bot);
+    void bot.launch({ dropPendingUpdates: true }).catch((error: unknown) => {
+      this.bots.delete(organizationId);
+      void this.prisma.integration.updateMany({
+        where: { organizationId, provider: 'TELEGRAM' },
+        data: { status: 'ERROR', lastError: 'The Telegram bot stopped polling. Check its connection and token.' },
+      });
+      const message = (error instanceof Error ? error.message : String(error)).replace(token, '[redacted]');
+      this.logger.error(`Telegram polling stopped for workspace ${organizationId}: ${message}`);
+    });
+    this.logger.log(`Telegram bot @${info.username || info.first_name} connected for workspace ${organizationId}`);
+    return info.username || info.first_name;
+  }
+
+  async disconnectWorkspace(organizationId: string): Promise<void> {
+    const bot = this.bots.get(organizationId);
+    if (bot) {
+      bot.stop('Workspace disconnected Telegram');
+      this.bots.delete(organizationId);
+    }
+    for (const key of this.userStates.keys()) {
+      if (key.startsWith(`${organizationId}:`)) this.userStates.delete(key);
+    }
+  }
+
+  isConnected(organizationId: string): boolean {
+    return this.bots.has(organizationId);
   }
 
   public parseNote(rawText: string): { title: string; content: string } {
@@ -107,11 +125,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     ]).resize();
   }
 
-  private registerHandlers(): void {
+  private registerHandlers(bot: Telegraf, organizationId: string): void {
+    const scopedChatId = (ctx: { chat: { id: number | string } }) => `${organizationId}:${ctx.chat.id}`;
+    const safeReply = (ctx: any, text: string, extra?: any) => this.safeReply(ctx, text, organizationId, extra);
     // Middleware: automatically record all incoming Telegram messages in database
-    this.bot.use(async (ctx, next) => {
+    bot.use(async (ctx, next) => {
       if (ctx.message && 'text' in ctx.message && ctx.message.text) {
-        void this.persistTelegramMessage(ctx, 'USER', ctx.message.text, ctx.message.message_id);
+        void this.persistTelegramMessage(ctx, 'USER', ctx.message.text, organizationId, ctx.message.message_id);
       }
       return next();
     });
@@ -142,7 +162,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handleStudyTopic = async (ctx: any, topic: string) => {
       if (!topic) {
-        return await this.safeReply(
+        return await safeReply(
           ctx,
           '⚠️ *Please specify a topic to research!*\n\n*Example:* `Quantum Computing` or `Docker Containerization`',
         );
@@ -163,7 +183,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
 
       try {
-        const result = await this.study.researchAndIndexTopic(topic);
+        const result = await this.study.researchAndIndexTopic(topic, organizationId);
 
         try {
           await ctx.deleteMessage(progressMsg.message_id);
@@ -186,7 +206,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.error(`Error generating study doc: ${msg}`);
-        return await this.safeReply(ctx, `❌ Failed to generate study doc: ${msg}`);
+        return await safeReply(ctx, `❌ Failed to generate study doc: ${msg}`);
       }
     };
 
@@ -196,10 +216,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await ctx.sendChatAction('typing');
 
       try {
-        const docs = await this.rag.listDocuments();
+        const docs = await this.rag.listDocuments(organizationId);
 
         if (docs.length === 0) {
-          return await this.safeReply(
+          return await safeReply(
             ctx,
             '📂 *Your knowledge base is empty!*\n\nTap *📝 Save Note* or upload a PDF/text file to get started.',
           );
@@ -228,16 +248,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         this.logger.error(`Error listing docs: ${errorMsg}`);
-        return await this.safeReply(ctx, `❌ Failed to list documents: ${errorMsg}`);
+        return await safeReply(ctx, `❌ Failed to list documents: ${errorMsg}`);
       }
     };
 
     // 1-Tap Inline Button Action: Delete document
-    this.bot.action(/^del_(.+)$/, async (ctx) => {
+    bot.action(/^del_(.+)$/, async (ctx) => {
       const docId = ctx.match[1];
       try {
         await ctx.answerCbQuery('Processing deletion...');
-        const result = await this.rag.deleteDocument(docId);
+        const result = await this.rag.deleteDocument(docId, organizationId);
         if (result.deleted) {
           await ctx.editMessageText(
             `🗑️ *Document Deleted Successfully:*\n"${result.title}" and all its vector chunks have been purged from PostgreSQL.`,
@@ -253,10 +273,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     });
 
     // 1-Tap Keyboard Menu Listeners
-    this.bot.hears('📝 Save Note', async (ctx) => {
-      const userId = String(ctx.from.id);
+    bot.hears('📝 Save Note', async (ctx) => {
+      const userId = `${organizationId}:${ctx.from.id}`;
       this.userStates.set(userId, { action: 'WAITING_NOTE', timestamp: Date.now() });
-      return await this.safeReply(
+      return await safeReply(
         ctx,
         `📝 *What note would you like me to save?*\n\n` +
           `Simply send your note text in your next message.\n` +
@@ -266,10 +286,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
     });
 
-    this.bot.hears('🎓 Research Topic', async (ctx) => {
-      const userId = String(ctx.from.id);
+    bot.hears('🎓 Research Topic', async (ctx) => {
+      const userId = `${organizationId}:${ctx.from.id}`;
       this.userStates.set(userId, { action: 'WAITING_TOPIC', timestamp: Date.now() });
-      return await this.safeReply(
+      return await safeReply(
         ctx,
         `🎓 *What topic would you like me to research?*\n\n` +
           `Send any topic (e.g., _Retrieval-Augmented Generation_, _Quantum Computing_, _FastAPI Architecture_).\n` +
@@ -278,10 +298,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
     });
 
-    this.bot.hears('🔍 Search Knowledge', async (ctx) => {
-      const userId = String(ctx.from.id);
+    bot.hears('🔍 Search Knowledge', async (ctx) => {
+      const userId = `${organizationId}:${ctx.from.id}`;
       this.userStates.set(userId, { action: 'WAITING_SEARCH', timestamp: Date.now() });
-      return await this.safeReply(
+      return await safeReply(
         ctx,
         `🔍 *Search Private Knowledge Base*\n\n` +
           `Send your question or search query. I will search all your indexed documents and notes with vector cosine similarity.\n\n` +
@@ -289,42 +309,42 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
     });
 
-    this.bot.hears('📚 My Documents', listDocsHandler);
+    bot.hears('📚 My Documents', listDocsHandler);
 
-    this.bot.hears('🧹 Clear Memory', async (ctx) => {
-      this.ai.clearHistory(String(ctx.chat.id));
-      this.userStates.delete(String(ctx.from.id));
-      return await this.safeReply(
+    bot.hears('🧹 Clear Memory', async (ctx) => {
+      this.ai.clearHistory(scopedChatId(ctx));
+      this.userStates.delete(`${organizationId}:${ctx.from.id}`);
+      return await safeReply(
         ctx,
         '🧹 *Conversation memory cleared!* Starting a fresh chat session.',
       );
     });
 
-    this.bot.hears('❓ Help', async (ctx) => {
+    bot.hears('❓ Help', async (ctx) => {
       const userName = ctx.from.first_name || 'Friend';
-      return await this.safeReply(ctx, getHelpMenu(userName));
+      return await safeReply(ctx, getHelpMenu(userName));
     });
 
     // Command: /start
-    this.bot.start(async (ctx) => {
+    bot.start(async (ctx) => {
       const userName = ctx.from.first_name || 'Friend';
       this.logger.log(`📥 Received /start from @${ctx.from.username || ctx.from.id} (${userName})`);
-      return await this.safeReply(ctx, getHelpMenu(userName));
+      return await safeReply(ctx, getHelpMenu(userName));
     });
 
     // Command: /help
-    this.bot.help(async (ctx) => {
+    bot.help(async (ctx) => {
       const userName = ctx.from.first_name || 'Friend';
       this.logger.log(`📥 Received /help from @${ctx.from.username || ctx.from.id}`);
-      return await this.safeReply(ctx, getHelpMenu(userName));
+      return await safeReply(ctx, getHelpMenu(userName));
     });
 
     // Command: /clear - Reset conversation memory
-    this.bot.command('clear', async (ctx) => {
-      this.ai.clearHistory(String(ctx.chat.id));
-      this.userStates.delete(String(ctx.from.id));
+    bot.command('clear', async (ctx) => {
+      this.ai.clearHistory(scopedChatId(ctx));
+      this.userStates.delete(`${organizationId}:${ctx.from.id}`);
       this.logger.log(`🧹 Conversation memory cleared for @${ctx.from.username || ctx.from.id}`);
-      return await this.safeReply(
+      return await safeReply(
         ctx,
         '🧹 *Conversation memory cleared!* Starting a fresh chat session.',
       );
@@ -338,18 +358,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return await handleStudyTopic(ctx, topic);
     };
 
-    this.bot.command('study', handleStudyCommand);
-    this.bot.command('research', handleStudyCommand);
+    bot.command('study', handleStudyCommand);
+    bot.command('research', handleStudyCommand);
 
     // Command: /listdocs - List all indexed documents in PostgreSQL
-    this.bot.command('listdocs', listDocsHandler);
+    bot.command('listdocs', listDocsHandler);
 
     // Command: /deletedoc <title or id>
-    this.bot.command('deletedoc', async (ctx) => {
+    bot.command('deletedoc', async (ctx) => {
       const target = ctx.message.text.replace(/^\/deletedoc\s*/i, '').trim();
 
       if (!target) {
-        return await this.safeReply(
+        return await safeReply(
           ctx,
           '⚠️ Please provide the title, index number, or ID of the document to delete.\n\n*Example:*\n`/deletedoc 1` or `/deletedoc notes.pdf`',
         );
@@ -358,33 +378,33 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await ctx.sendChatAction('typing');
 
       try {
-        const result = await this.rag.deleteDocument(target);
+        const result = await this.rag.deleteDocument(target, organizationId);
 
         if (!result.deleted) {
-          return await this.safeReply(
+          return await safeReply(
             ctx,
             `⚠️ Document not found: "${target}". Tap *📚 My Documents* to view available documents.`,
           );
         }
 
-        return await this.safeReply(
+        return await safeReply(
           ctx,
           `🗑️ *Document Deleted Successfully:*\n"${result.title}" and all its vector chunks have been removed from PostgreSQL.`,
         );
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         this.logger.error(`Error deleting doc: ${errorMsg}`);
-        return await this.safeReply(ctx, `❌ Failed to delete document: ${errorMsg}`);
+        return await safeReply(ctx, `❌ Failed to delete document: ${errorMsg}`);
       }
     });
 
     // Command: /addnote <Title> | <Content>
-    this.bot.command('addnote', async (ctx) => {
+    bot.command('addnote', async (ctx) => {
       const fullText = ctx.message.text.replace(/^\/addnote\s*/i, '').trim();
       const { title, content } = this.parseNote(fullText);
 
       if (!title || !content) {
-        return await this.safeReply(
+        return await safeReply(
           ctx,
           `⚠️ *Invalid format!* Please send title and content:\n\n*Example:*\n\`/addnote Server IP | 192.168.1.1\``,
         );
@@ -393,8 +413,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await ctx.sendChatAction('typing');
 
       try {
-        const result = await this.rag.indexTextDocument(title, content);
-        return await this.safeReply(
+        const result = await this.rag.indexTextDocument(title, content, 'text/plain', undefined, organizationId);
+        return await safeReply(
           ctx,
           `✅ *Document Indexed Successfully!*\n\n` +
             `📁 *Title:* ${title}\n` +
@@ -405,16 +425,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         this.logger.error(`Error indexing note: ${errorMsg}`);
-        return await this.safeReply(ctx, `❌ Failed to index document: ${errorMsg}`);
+        return await safeReply(ctx, `❌ Failed to index document: ${errorMsg}`);
       }
     });
 
     // Command: /ask <query> - Grounded RAG Search
-    this.bot.command('ask', async (ctx) => {
+    bot.command('ask', async (ctx) => {
       const query = ctx.message.text.replace(/^\/ask\s*/i, '').trim();
 
       if (!query) {
-        return await this.safeReply(
+        return await safeReply(
           ctx,
           `⚠️ Please provide a question after \`/ask\`.\n\n*Example:*\n\`/ask What is the refund policy?\``,
         );
@@ -425,23 +445,23 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       await ctx.sendChatAction('typing');
 
       try {
-        const { answer, sources } = await this.rag.answerWithKnowledge(query, String(ctx.chat.id));
+        const { answer, sources } = await this.rag.answerWithKnowledge(query, scopedChatId(ctx), organizationId);
 
         let replyMessage = answer;
         if (sources.length > 0) {
           replyMessage += `\n\n📚 *Sources Cited:*\n${sources.map((s) => `• ${s}`).join('\n')}`;
         }
 
-        return await this.safeReply(ctx, replyMessage);
+        return await safeReply(ctx, replyMessage);
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         this.logger.error(`RAG Search error: ${errorMsg}`);
-        return await this.safeReply(ctx, `❌ Error querying knowledge base: ${errorMsg}`);
+        return await safeReply(ctx, `❌ Error querying knowledge base: ${errorMsg}`);
       }
     });
 
     // Document File Uploads (PDF, TXT, Markdown, CSV, JSON)
-    this.bot.on('document', async (ctx) => {
+    bot.on('document', async (ctx) => {
       const doc = ctx.message.document;
       const fileName = doc.file_name || 'uploaded_document';
       const mimeType = doc.mime_type || 'application/octet-stream';
@@ -482,12 +502,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           mimeType,
           bufferBase64: buffer.toString('base64'),
           source: 'telegram',
+          organizationId,
           senderId: user,
         });
 
         this.logger.log(`📥 Added document "${fileName}" to BullMQ Queue (Job ID: ${job.id})`);
 
-        return await this.safeReply(
+        return await safeReply(
           ctx,
           `⚡ *Document Queued in Background! (Job #${job.id})*\n\n` +
             `📄 *File:* \`${fileName}\`\n` +
@@ -502,7 +523,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     });
 
     // Voice Message Handler (Speech-to-Text via Groq Whisper & Voice Reply)
-    this.bot.on('voice', async (ctx) => {
+    bot.on('voice', async (ctx) => {
       const voice = ctx.message.voice;
       const user = `@${ctx.from.username || ctx.from.id}`;
       this.logger.log(`🎙️ Received voice note from ${user} (${voice.duration}s)`);
@@ -520,7 +541,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         this.logger.log(`📝 Transcribed Telegram voice from ${user}: "${transcription}"`);
 
         // Generate response with Soumadeep AI (Groq 120B)
-        const answer = await this.ai.generateAnswer(transcription, undefined, String(ctx.chat.id));
+        const answer = await this.ai.generateAnswer(transcription, undefined, scopedChatId(ctx));
 
         // Generate speech audio reply
         try {
@@ -543,9 +564,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     });
 
     // Generic text messages -> State Machine & Natural Language Intent Detection (Solution 1 & 2)
-    this.bot.on('text', async (ctx) => {
+    bot.on('text', async (ctx) => {
       const text = ctx.message.text?.trim() || '';
-      const userId = String(ctx.from?.id);
+      const userId = `${organizationId}:${ctx.from?.id}`;
       const user = `@${ctx.from?.username || ctx.from?.id}`;
 
       // Ignore other bot commands that start with /
@@ -557,7 +578,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       if (/^(cancel|abort|exit|stop)$/i.test(text)) {
         if (this.userStates.has(userId)) {
           this.userStates.delete(userId);
-          return await this.safeReply(ctx, '✖️ *Action cancelled.* How else can I help you?');
+          return await safeReply(ctx, '✖️ *Action cancelled.* How else can I help you?');
         }
       }
 
@@ -570,8 +591,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           const { title, content } = this.parseNote(text);
           await ctx.sendChatAction('typing');
           try {
-            const result = await this.rag.indexTextDocument(title, content);
-            return await this.safeReply(
+            const result = await this.rag.indexTextDocument(title, content, 'text/plain', undefined, organizationId);
+            return await safeReply(
               ctx,
               `✅ *Note Saved Successfully!* 📝\n\n` +
                 `📌 *Title:* ${title}\n` +
@@ -581,7 +602,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
             );
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            return await this.safeReply(ctx, `❌ Failed to save note: ${msg}`);
+            return await safeReply(ctx, `❌ Failed to save note: ${msg}`);
           }
         }
 
@@ -594,16 +615,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           try {
             const { answer, sources } = await this.rag.answerWithKnowledge(
               text,
-              String(ctx.chat.id),
+              scopedChatId(ctx),
+              organizationId,
             );
             let reply = answer;
             if (sources.length > 0) {
               reply += `\n\n📚 *Sources Cited:*\n${sources.map((s) => `• ${s}`).join('\n')}`;
             }
-            return await this.safeReply(ctx, reply);
+            return await safeReply(ctx, reply);
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
-            return await this.safeReply(ctx, `❌ Error searching knowledge: ${msg}`);
+            return await safeReply(ctx, `❌ Error searching knowledge: ${msg}`);
           }
         }
       }
@@ -621,8 +643,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         const { title, content } = this.parseNote(rawNote);
         await ctx.sendChatAction('typing');
         try {
-          const result = await this.rag.indexTextDocument(title, content);
-          return await this.safeReply(
+          const result = await this.rag.indexTextDocument(title, content, 'text/plain', undefined, organizationId);
+          return await safeReply(
             ctx,
             `✅ *Note Saved Successfully!* 📝\n\n` +
               `📌 *Title:* ${title}\n` +
@@ -632,7 +654,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           );
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          return await this.safeReply(ctx, `❌ Failed to save note: ${msg}`);
+          return await safeReply(ctx, `❌ Failed to save note: ${msg}`);
         }
       }
 
@@ -646,20 +668,20 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         const target = deleteMatch[1].trim();
         await ctx.sendChatAction('typing');
         try {
-          const result = await this.rag.deleteDocument(target);
+          const result = await this.rag.deleteDocument(target, organizationId);
           if (result.deleted) {
-            return await this.safeReply(
+            return await safeReply(
               ctx,
               `🗑️ *Document Deleted Successfully:*\n"${result.title}" and its vector chunks have been removed from PostgreSQL.`,
             );
           }
-          return await this.safeReply(
+          return await safeReply(
             ctx,
             `⚠️ Document not found: "${target}". Tap *📚 My Documents* to view available documents.`,
           );
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          return await this.safeReply(ctx, `❌ Failed to delete document: ${msg}`);
+          return await safeReply(ctx, `❌ Failed to delete document: ${msg}`);
         }
       }
 
@@ -692,9 +714,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         ) ||
         /^(?:clear\s+memory|reset\s+chat|forget\s+everything)$/i.test(text)
       ) {
-        this.ai.clearHistory(String(ctx.chat.id));
+        this.ai.clearHistory(scopedChatId(ctx));
         this.userStates.delete(userId);
-        return await this.safeReply(
+        return await safeReply(
           ctx,
           '🧹 *Conversation memory cleared!* Starting a fresh chat session.',
         );
@@ -710,16 +732,17 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         try {
           const { answer, sources } = await this.rag.answerWithKnowledge(
             recallMatch[1].trim(),
-            String(ctx.chat.id),
+            scopedChatId(ctx),
+            organizationId,
           );
           let reply = answer;
           if (sources.length > 0) {
             reply += `\n\n📚 *Sources Cited:*\n${sources.map((s) => `• ${s}`).join('\n')}`;
           }
-          return await this.safeReply(ctx, reply);
+          return await safeReply(ctx, reply);
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          return await this.safeReply(ctx, `❌ Error retrieving knowledge: ${msg}`);
+          return await safeReply(ctx, `❌ Error retrieving knowledge: ${msg}`);
         }
       }
 
@@ -732,7 +755,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         try {
           const prevCount = await this.prisma.telegramMessage.count({
             where: {
-              telegramChat: { chatId: BigInt(ctx.chat.id) },
+              telegramChat: { is: { organizationId, chatId: BigInt(ctx.chat.id) } },
               role: 'ASSISTANT',
             },
           });
@@ -741,15 +764,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           isFirstMessage = false;
         }
 
-        const answer = await this.ai.generateAnswer(text, undefined, String(ctx.chat.id));
+        const knowledgeResult = await this.rag.answerWithKnowledge(text, scopedChatId(ctx), organizationId);
+        const answer = knowledgeResult.sources.length
+          ? `${knowledgeResult.answer}\n\nSources: ${knowledgeResult.sources.join(', ')}`
+          : knowledgeResult.answer;
         this.logger.log(`✅ AI answered ${user} successfully`);
 
         if (isFirstMessage) {
           const welcome = getHelpMenu(ctx.from?.first_name || 'Friend');
-          await this.safeReply(ctx, welcome);
+          await safeReply(ctx, welcome);
         }
 
-        return await this.safeReply(ctx, answer);
+        return await safeReply(ctx, answer);
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         this.logger.error(`Error answering query for ${user}: ${errorMsg}`);
@@ -764,8 +790,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
    * Automatically attaches the persistent 1-tap keyboard buttons unless overridden.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async safeReply(ctx: any, text: string, extra?: any): Promise<any> {
-    void this.persistTelegramMessage(ctx, 'ASSISTANT', text);
+  private async safeReply(ctx: any, text: string, organizationId: string, extra?: any): Promise<any> {
+    void this.persistTelegramMessage(ctx, 'ASSISTANT', text, organizationId);
     const options = {
       parse_mode: 'Markdown' as const,
       ...this.getMainMenuKeyboard(),
@@ -783,6 +809,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     ctx: any,
     role: 'USER' | 'ASSISTANT',
     text: string,
+    organizationId: string,
     messageId?: number,
   ): Promise<void> {
     try {
@@ -806,12 +833,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       });
 
       const chatRecord = await this.prisma.telegramChat.upsert({
-        where: { chatId: BigInt(chat.id) },
+        where: { organizationId_chatId: { organizationId, chatId: BigInt(chat.id) } },
         update: {
           type: chat.type ?? 'private',
           title: ('title' in chat ? chat.title : from.first_name) ?? null,
         },
         create: {
+          organizationId,
           chatId: BigInt(chat.id),
           type: chat.type ?? 'private',
           title: ('title' in chat ? chat.title : from.first_name) ?? null,
@@ -848,9 +876,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
-    if (this.bot) {
-      this.logger.log('Stopping Telegram Bot gracefully...');
-      this.bot.stop('Application terminated');
-    }
+    this.logger.log('Stopping Telegram bots gracefully...');
+    for (const bot of this.bots.values()) bot.stop('Application terminated');
+    this.bots.clear();
   }
 }

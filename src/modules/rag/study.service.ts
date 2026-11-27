@@ -455,7 +455,7 @@ export class StudyService {
    * 4. Orchestrates the complete pipeline:
    * Search -> Compile -> Generate PDF -> Auto-Index in pgvector
    */
-  async researchAndIndexTopic(topic: string): Promise<GeneratedStudyDoc> {
+  async researchAndIndexTopic(topic: string, organizationId?: string): Promise<GeneratedStudyDoc> {
     const cleanTopic = topic.trim();
     const sanitizedName = cleanTopic.replace(/[^a-zA-Z0-9_-]/g, '_');
     const fileName = `${sanitizedName}_Master_Guide.pdf`;
@@ -478,6 +478,7 @@ export class StudyService {
       fileName,
       'application/pdf',
       pdfBuffer,
+      organizationId,
     );
 
     return {

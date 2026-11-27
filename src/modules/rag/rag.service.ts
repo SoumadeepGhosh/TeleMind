@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { AiService } from '../ai/ai.service';
 
@@ -26,8 +26,10 @@ export class RagService {
     text: string,
     mimeType = 'text/plain',
     fileSize?: number,
+    organizationId?: string,
+    uploadedById?: string,
   ): Promise<{ documentId: string; chunkCount: number }> {
-    this.logger.log(`📄 Ingesting document: "${title}" (${text.length} chars)`);
+    this.logger.log(`ðŸ“„ Ingesting document: "${title}" (${text.length} chars)`);
 
     // 1. Split text into chunks (~500 characters with simple sentence preservation)
     const chunks = this.chunkText(text, 500);
@@ -40,6 +42,8 @@ export class RagService {
     const doc = await this.prisma.document.create({
       data: {
         title,
+        organizationId,
+        uploadedById,
         knowledgeBaseId: defaultKb?.id,
         fileKey: `inline://${title.toLowerCase().replace(/\s+/g, '-')}`,
         fileSize: fileSize ?? Buffer.byteLength(text, 'utf-8'),
@@ -94,7 +98,7 @@ export class RagService {
       // Non-fatal
     }
 
-    this.logger.log(`✅ Successfully indexed "${title}" with ${chunks.length} vector chunks`);
+    this.logger.log(`âœ… Successfully indexed "${title}" with ${chunks.length} vector chunks`);
     return { documentId: doc.id, chunkCount: chunks.length };
   }
 
@@ -105,57 +109,68 @@ export class RagService {
     fileName: string,
     mimeType: string,
     buffer: Buffer,
+    organizationId?: string,
+    uploadedById?: string,
   ): Promise<{ documentId: string; chunkCount: number }> {
     this.logger.log(
-      `📥 Processing attached file: "${fileName}" (${mimeType}, ${buffer.length} bytes)`,
+      `ðŸ“¥ Processing attached file: "${fileName}" (${mimeType}, ${buffer.length} bytes)`,
     );
 
     let extractedText = '';
 
-    if (mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')) {
-      const pdfParse = require('pdf-parse');
-      const pdfData = await pdfParse(buffer);
-      extractedText = pdfData.text || '';
-    } else if (
-      mimeType.startsWith('text/') ||
-      fileName.endsWith('.txt') ||
-      fileName.endsWith('.md') ||
-      fileName.endsWith('.json') ||
-      fileName.endsWith('.csv')
-    ) {
+    const extension = fileName.split('.').pop()?.toLowerCase();
+    if (extension === 'pdf') {
+      try {
+        const pdfParse = require('pdf-parse');
+        const pdfData = await pdfParse(buffer);
+        extractedText = pdfData.text || '';
+      } catch {
+        throw new BadRequestException('Could not read this PDF. Check that it is a valid, text-based PDF.');
+      }
+    } else if (['txt', 'md', 'json', 'csv'].includes(extension || '')) {
       extractedText = buffer.toString('utf-8');
     } else {
-      throw new Error(
-        `Unsupported file type (${mimeType || fileName}). Please upload a PDF or text/markdown file.`,
-      );
+      throw new BadRequestException('Unsupported file type. Choose a PDF, TXT, Markdown, CSV, or JSON file.');
     }
 
     const cleanText = extractedText.replace(/\r\n/g, '\n').trim();
     if (!cleanText || cleanText.length < 5) {
-      throw new Error(
-        'Could not extract readable text from this file. It may be an image scan or empty.',
-      );
+      throw new BadRequestException('Could not extract readable text. The file may be empty or an image scan.');
+    }
+    if (cleanText.length > 100_000) {
+      throw new BadRequestException('Extracted file text exceeds the 100,000 character limit.');
     }
 
-    return this.indexTextDocument(fileName, cleanText, mimeType, buffer.length);
+    return this.indexTextDocument(fileName, cleanText, mimeType, buffer.length, organizationId, uploadedById);
   }
 
   /**
    * Vector similarity search using pgvector cosine distance (<=>)
    */
-  async searchKnowledge(query: string, limit = 3): Promise<SearchResult[]> {
-    this.logger.log(`🔍 Searching knowledge base for: "${query}"`);
+  async searchKnowledge(query: string, limit = 3, organizationId?: string): Promise<SearchResult[]> {
+    this.logger.log(`ðŸ” Searching knowledge base for: "${query}"`);
 
     // 1. Generate embedding for query text
     const queryVector = await this.ai.generateEmbedding(query);
     const vectorString = `[${queryVector.join(',')}]`;
 
     // 2. Execute cosine similarity query against document_chunks
-    const results = await this.prisma.$queryRaw<SearchResult[]>`
-      SELECT 
+    const results = organizationId
+      ? await this.prisma.$queryRaw<SearchResult[]>`
+      SELECT
         dc.id, 
         dc.content, 
         d.title, 
+        (1 - (dc.embedding <=> ${vectorString}::vector))::float AS similarity
+      FROM document_chunks dc
+      JOIN documents d ON d.id = dc."documentId"
+      WHERE d.status = 'INDEXED' AND d."organizationId" = ${organizationId}::uuid
+      ORDER BY dc.embedding <=> ${vectorString}::vector
+      LIMIT ${limit}
+    `
+      : await this.prisma.$queryRaw<SearchResult[]>`
+      SELECT
+        dc.id, dc.content, d.title,
         (1 - (dc.embedding <=> ${vectorString}::vector))::float AS similarity
       FROM document_chunks dc
       JOIN documents d ON d.id = dc."documentId"
@@ -173,12 +188,14 @@ export class RagService {
   async answerWithKnowledge(
     query: string,
     chatId?: string,
+    organizationId?: string,
+    preferredModel?: 'groq' | 'gemini',
   ): Promise<{ answer: string; sources: string[] }> {
     // 1. Retrieve the top relevant document chunks
-    const matches = await this.searchKnowledge(query, 3);
+    const matches = await this.searchKnowledge(query, 3, organizationId);
 
     if (matches.length === 0) {
-      const fallbackAnswer = await this.ai.generateAnswer(query, undefined, chatId);
+      const fallbackAnswer = await this.ai.generateAnswer(query, undefined, chatId, preferredModel);
       return { answer: fallbackAnswer, sources: [] };
     }
 
@@ -190,8 +207,8 @@ export class RagService {
       )
       .join('\n\n---\n\n');
 
-    // 3. Ask Gemini with context AND chatId for conversational continuity
-    const answer = await this.ai.generateAnswer(query, context, chatId);
+    // 3. Ask AI with context AND chatId for conversational continuity
+    const answer = await this.ai.generateAnswer(query, context, chatId, preferredModel);
     const sources = matches.map((m) => `${m.title} (${(m.similarity * 100).toFixed(0)}% match)`);
 
     return { answer, sources };
@@ -200,14 +217,18 @@ export class RagService {
   /**
    * Retrieves all indexed documents from the database
    */
-  async listDocuments() {
+  async listDocuments(organizationId?: string) {
     return this.prisma.document.findMany({
+      ...(organizationId ? { where: { organizationId } } : {}),
       select: {
         id: true,
         title: true,
+        mimeType: true,
         totalChunks: true,
         fileSize: true,
+        status: true,
         createdAt: true,
+        updatedAt: true,
       },
       orderBy: { createdAt: 'desc' },
       take: 20,
@@ -217,17 +238,17 @@ export class RagService {
   /**
    * Deletes a document by title, partial title, index number, or ID, cascade-deleting all associated vector chunks
    */
-  async deleteDocument(titleOrId: string): Promise<{ deleted: boolean; title: string }> {
+  async deleteDocument(titleOrId: string, organizationId?: string): Promise<{ deleted: boolean; title: string }> {
     const trimmed = titleOrId.trim();
 
     // 1. If user passed a number (e.g. "1"), delete by index from recent documents
     if (/^\d+$/.test(trimmed)) {
       const index = parseInt(trimmed, 10) - 1;
-      const docs = await this.listDocuments();
+      const docs = await this.listDocuments(organizationId);
       if (index >= 0 && index < docs.length) {
         const targetDoc = docs[index];
-        await this.prisma.document.delete({ where: { id: targetDoc.id } });
-        this.logger.log(`🗑️ Deleted document #${trimmed} "${targetDoc.title}"`);
+        await this.prisma.document.delete({ where: { id: targetDoc.id, ...(organizationId ? { organizationId } : {}) } });
+        this.logger.log(`ðŸ—‘ï¸ Deleted document #${trimmed} "${targetDoc.title}"`);
         return { deleted: true, title: targetDoc.title };
       }
     }
@@ -235,6 +256,7 @@ export class RagService {
     // 2. Find document by ID, exact title, or partial title (case-insensitive)
     let doc = await this.prisma.document.findFirst({
       where: {
+        ...(organizationId ? { organizationId } : {}),
         OR: [
           { id: trimmed.length === 36 ? trimmed : undefined },
           { title: { equals: trimmed, mode: 'insensitive' } },
@@ -265,7 +287,7 @@ export class RagService {
       // Non-fatal
     }
 
-    this.logger.log(`🗑️ Deleted document "${doc.title}" and its vector chunks`);
+    this.logger.log(`ðŸ—‘ï¸ Deleted document "${doc.title}" and its vector chunks`);
     return { deleted: true, title: doc.title };
   }
 
